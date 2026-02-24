@@ -88,6 +88,8 @@ async function processJob(job) {
 
       if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
         const key = `jobs/${job.id}/output.${fmt}`;
+        const fileSize = fs.statSync(outFile).size;
+
         await r2.send(new PutObjectCommand({
           Bucket: BUCKET,
           Key: key,
@@ -95,20 +97,26 @@ async function processJob(job) {
           ContentType: 'application/octet-stream',
         }));
 
-        outputs[fmt] = `https://${BUCKET}.r2.dev/${key}`;
-        console.log(`✅ Uploaded ${fmt}: ${outputs[fmt]}`);
+        outputs[fmt] = {
+          url: `https://${BUCKET}.r2.dev/${key}`,
+          size: fileSize,
+        };
+
+        console.log(`✅ Uploaded ${fmt}: ${outputs[fmt].url} (${fileSize} bytes)`);
       } else {
         console.error(`❌ Export failed for ${fmt} - file not created`);
       }
     }
 
     const status = Object.keys(outputs).length > 0 ? 'done' : 'failed';
+
     await jobRef.update({
       status,
       outputs,
       completedAt: Date.now(),
       error: status === 'failed' ? 'All exports failed' : null,
     });
+
     console.log(`Job ${job.id} → ${status}`);
 
   } catch (err) {
