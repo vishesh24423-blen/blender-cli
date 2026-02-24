@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import admin from 'firebase-admin';
 
-// Use REST API approach for server-side Firestore operations
-// to avoid admin SDK complexity — we'll use the client REST API
+// Initialize Admin SDK only once
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(
+            JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY!)
+        ),
+    });
+}
+
+const db = admin.firestore();
 
 export async function POST(request: NextRequest) {
     try {
@@ -12,114 +19,44 @@ export async function POST(request: NextRequest) {
 
         // Validate
         if (!script || typeof script !== 'string') {
-            return NextResponse.json(
-                { error: 'Script is required' },
-                { status: 400 }
-            );
+            return NextResponse.json({ error: 'Script is required' }, { status: 400 });
         }
 
         if (!formats || !Array.isArray(formats) || formats.length === 0) {
-            return NextResponse.json(
-                { error: 'At least one format must be selected' },
-                { status: 400 }
-            );
+            return NextResponse.json({ error: 'At least one format must be selected' }, { status: 400 });
         }
 
         const validFormats = ['glb', 'fbx', 'stl', 'obj', 'usd'];
         const invalidFormats = formats.filter((f: string) => !validFormats.includes(f));
         if (invalidFormats.length > 0) {
-            return NextResponse.json(
-                { error: `Invalid formats: ${invalidFormats.join(', ')}` },
-                { status: 400 }
-            );
+            return NextResponse.json({ error: `Invalid formats: ${invalidFormats.join(', ')}` }, { status: 400 });
         }
 
-        const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-        const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-
-        if (!projectId || !apiKey) {
-            return NextResponse.json(
-                { error: 'Firebase configuration missing' },
-                { status: 500 }
-            );
-        }
-
-        // Create job document via Firestore REST API
-        const jobData = {
-            fields: {
-                script: { stringValue: script },
-                userId: { stringValue: 'anonymous' },
-                status: { stringValue: 'queued' },
-                formats: {
-                    arrayValue: {
-                        values: formats.map((f: string) => ({ stringValue: f })),
-                    },
-                },
-                outputs: { mapValue: { fields: {} } },
-                createdAt: { integerValue: String(Date.now()) },
-            },
-        };
-
-        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/jobs?key=${apiKey}`;
-
-        const firestoreRes = await fetch(firestoreUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(jobData),
+        // Create job in Firestore via Admin SDK (bypasses security rules)
+        const jobRef = await db.collection('jobs').add({
+            script,
+            userId: 'anonymous',
+            status: 'queued',
+            formats,
+            outputs: {},
+            createdAt: Date.now(),
         });
 
-        if (!firestoreRes.ok) {
-            const errData = await firestoreRes.text();
-            console.error('Firestore error:', errData);
-            return NextResponse.json(
-                { error: 'Failed to create job in Firestore' },
-                { status: 500 }
-            );
-        }
+        const jobId = jobRef.id;
 
-        const createdDoc = await firestoreRes.json();
-        // Extract job ID from the document name
-        // name format: "projects/{project}/databases/(default)/documents/jobs/{jobId}"
-        const docName: string = createdDoc.name;
-        const jobId = docName.split('/').pop()!;
-
-        // Try to trigger GitHub Actions workflow
+        // Trigger GitHub Actions if not already processing
         const githubToken = process.env.GITHUB_TOKEN;
         const githubOwner = process.env.GITHUB_OWNER;
         const githubRepo = process.env.GITHUB_REPO;
 
         if (githubToken && githubOwner && githubRepo) {
             // Check if any job is currently processing
-            const queryUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery?key=${apiKey}`;
-            const queryBody = {
-                structuredQuery: {
-                    from: [{ collectionId: 'jobs' }],
-                    where: {
-                        fieldFilter: {
-                            field: { fieldPath: 'status' },
-                            op: 'EQUAL',
-                            value: { stringValue: 'processing' },
-                        },
-                    },
-                    limit: 1,
-                },
-            };
+            const processingSnap = await db.collection('jobs')
+                .where('status', '==', 'processing')
+                .limit(1)
+                .get();
 
-            const queryRes = await fetch(queryUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(queryBody),
-            });
-
-            let hasProcessingJob = false;
-            if (queryRes.ok) {
-                const queryData = await queryRes.json();
-                hasProcessingJob = queryData.some(
-                    (r: { document?: unknown }) => r.document
-                );
-            }
-
-            if (!hasProcessingJob) {
+            if (processingSnap.empty) {
                 try {
                     const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/blender-worker.yml/dispatches`;
                     const dispatchRes = await fetch(dispatchUrl, {
@@ -129,32 +66,22 @@ export async function POST(request: NextRequest) {
                             Accept: 'application/vnd.github.v3+json',
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({
-                            ref: 'main',
-                            inputs: { job_id: jobId },
-                        }),
+                        body: JSON.stringify({ ref: 'main', inputs: { job_id: jobId } }),
                     });
 
                     if (!dispatchRes.ok) {
-                        console.error(
-                            'GitHub Actions dispatch failed:',
-                            dispatchRes.status,
-                            await dispatchRes.text()
-                        );
+                        console.error('GitHub dispatch failed:', dispatchRes.status, await dispatchRes.text());
                     }
                 } catch (ghError) {
                     console.error('GitHub Actions trigger error:', ghError);
-                    // Don't fail the job creation if GH trigger fails
                 }
             }
         }
 
         return NextResponse.json({ jobId }, { status: 201 });
+
     } catch (err) {
         console.error('Submit job error:', err);
-        return NextResponse.json(
-            { error: 'Internal server error' },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 }
