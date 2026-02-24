@@ -1,0 +1,48 @@
+name: Blender Persistent Worker
+on:
+  schedule:
+    - cron: '0 0,6,12,18 * * *'  # every 6h UTC = 5:30AM/11:30AM/5:30PM/11:30PM IST
+  workflow_dispatch:              # manual trigger from GitHub UI
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Blender
+        run: |
+          sudo snap install blender --classic
+          blender --version
+
+      - name: Mark runner ACTIVE
+        env:
+          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
+        run: node scripts/set_runner_status.js active
+
+      - name: Run persistent queue worker
+        env:
+          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          WINDOW_MINUTES: '355'
+        run: node scripts/persistent_worker.js
+
+      - name: Mark runner INACTIVE
+        if: always()   # runs even if worker crashes
+        env:
+          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
+        run: node scripts/set_runner_status.js inactive
