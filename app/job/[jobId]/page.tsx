@@ -20,13 +20,18 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
     const { runner } = useRunner();
     const nextRunCountdown = useCountdown(runner?.nextRunAt);
     const [queuePosition, setQueuePosition] = useState<number | null>(null);
+    const isQueued = job?.status === 'queued';
+
+    // ✅ FIXED: moved out of render body into useEffect
+    useEffect(() => {
+        if (!isQueued) {
+            setQueuePosition(null);
+        }
+    }, [isQueued]);
 
     // Calculate queue position
     useEffect(() => {
-        if (!job || job.status !== 'queued') {
-            setQueuePosition(null);
-            return;
-        }
+        if (!isQueued) return;
 
         const fetchPosition = async () => {
             try {
@@ -46,7 +51,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         fetchPosition();
         const interval = setInterval(fetchPosition, 10000);
         return () => clearInterval(interval);
-    }, [job, jobId]);
+    }, [isQueued, jobId]);
 
     const handleRetry = () => {
         router.push('/');
@@ -90,7 +95,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
                     <h1 className="job-title">Job Status</h1>
                     <span className={`status-badge status-badge--${job.status}`}>
-                        {job.status}
+                        {job.status.toUpperCase()}
                     </span>
                 </div>
             </div>
@@ -115,7 +120,9 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                                     ⏳ Runner is idle
                                 </span>
                                 <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                                    Next activation in: <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{nextRunCountdown.formatted}</strong>
+                                    Next activation in: <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                                        {nextRunCountdown.formatted}
+                                    </strong>
                                 </span>
                             </div>
                         )}

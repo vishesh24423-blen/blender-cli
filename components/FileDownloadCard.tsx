@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useCountdown } from '@/hooks/useCountdown';
 import { formatFileSize } from '@/lib/utils';
 import type { OutputFormat } from '@/lib/types';
@@ -21,7 +22,7 @@ const FORMAT_COLORS: Record<string, string> = {
 
 export default function FileDownloadCard({ format, url, size }: FileDownloadCardProps) {
     // Assume 24 hour expiry from now (R2 signed URLs)
-    const expiryTime = Date.now() + 24 * 60 * 60 * 1000;
+    const expiryTime = useMemo(() => Date.now() + 24 * 60 * 60 * 1000, []);
     const expiry = useCountdown(expiryTime);
 
     const color = FORMAT_COLORS[format] || '#6b7280';

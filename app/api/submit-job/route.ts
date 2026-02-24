@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: `Invalid formats: ${invalidFormats.join(', ')}` }, { status: 400 });
         }
 
+        // 1. Create job in Firestore
         const jobRef = await db.collection('jobs').add({
             script,
             userId: 'anonymous',
@@ -41,39 +42,45 @@ export async function POST(request: NextRequest) {
 
         const jobId = jobRef.id;
 
-        const githubToken = process.env.GITHUB_TOKEN;
-        const githubOwner = process.env.GITHUB_OWNER;
-        const githubRepo = process.env.GITHUB_REPO;
+        // 2. Check runner status
+        try {
+            const runnerDoc = await db.collection('system').doc('runner').get();
+            const runnerStatus = runnerDoc.data()?.status ?? 'inactive';
 
-        if (githubToken && githubOwner && githubRepo) {
-            const processingSnap = await db.collection('jobs')
-                .where('status', '==', 'processing')
-                .limit(1)
-                .get();
+            // 3. Only trigger workflow if runner is inactive
+            if (runnerStatus === 'inactive') {
+                const githubToken = process.env.GITHUB_TOKEN;
+                const githubOwner = process.env.GITHUB_OWNER;
+                const githubRepo = process.env.GITHUB_REPO;
 
-            if (processingSnap.empty) {
-                try {
-                    const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;
+                if (githubToken && githubOwner && githubRepo) {
+                    try {
+                        const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;
 
-                    const dispatchRes = await fetch(dispatchUrl, {  // ← was missing this line
-                        method: 'POST',
-                        headers: {
-                            Authorization: `Bearer ${githubToken}`,
-                            Accept: 'application/vnd.github.v3+json',
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ ref: 'main' }),  // ← removed job_id input
-                    });
+                        const dispatchRes = await fetch(dispatchUrl, {
+                            method: 'POST',
+                            headers: {
+                                Authorization: `Bearer ${githubToken}`,
+                                Accept: 'application/vnd.github+json',
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ ref: 'main' }),
+                        });
 
-                    if (!dispatchRes.ok) {
-                        console.error('GitHub dispatch failed:', dispatchRes.status, await dispatchRes.text());
-                    } else {
-                        console.log('GitHub Actions triggered successfully');
+                        if (dispatchRes.ok) {
+                            console.log(`✅ Workflow triggered for job ${jobId} — runner was inactive`);
+                        } else {
+                            console.error(`⚠️ Failed to trigger workflow: ${dispatchRes.status}`, await dispatchRes.text());
+                        }
+                    } catch (ghError) {
+                        console.error('⚠️ GitHub workflow trigger failed:', ghError);
                     }
-                } catch (ghError) {
-                    console.error('GitHub Actions trigger error:', ghError);
                 }
+            } else {
+                console.log(`✅ Job ${jobId} queued — runner already active`);
             }
+        } catch (runnerCheckError) {
+            console.error('⚠️ Failed to check runner status:', runnerCheckError);
         }
 
         return NextResponse.json({ jobId }, { status: 201 });

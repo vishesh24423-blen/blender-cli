@@ -3,15 +3,20 @@
 import { useState, useEffect, useCallback } from 'react';
 
 export function useCountdown(targetTimestamp: number | undefined | null) {
-    const [timeLeft, setTimeLeft] = useState<number>(0);
-
     const calculate = useCallback(() => {
         if (!targetTimestamp) return 0;
         return Math.max(0, targetTimestamp - Date.now());
     }, [targetTimestamp]);
 
-    useEffect(() => {
+    const [timeLeft, setTimeLeft] = useState<number>(calculate);
+    const [prevTarget, setPrevTarget] = useState(targetTimestamp);
+
+    if (targetTimestamp !== prevTarget) {
+        setPrevTarget(targetTimestamp);
         setTimeLeft(calculate());
+    }
+
+    useEffect(() => {
         const interval = setInterval(() => {
             setTimeLeft(calculate());
         }, 1000);

@@ -22,6 +22,7 @@ const r2 = new S3Client({
 });
 
 const BUCKET = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL; // ✅ UPDATED: use secret
 const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 1000;
 const startTime = Date.now();
 
@@ -90,16 +91,27 @@ async function processJob(job) {
         const key = `jobs/${job.id}/output.${fmt}`;
         const fileSize = fs.statSync(outFile).size;
 
+        // ✅ UPDATED: correct MIME types per format
+        const contentTypes = {
+          glb: 'model/gltf-binary',
+          fbx: 'application/octet-stream',
+          stl: 'model/stl',
+          obj: 'model/obj',
+          usd: 'application/octet-stream',
+        };
+
         await r2.send(new PutObjectCommand({
           Bucket: BUCKET,
           Key: key,
           Body: fs.readFileSync(outFile),
-          ContentType: 'application/octet-stream',
+          ContentType: contentTypes[fmt] || 'application/octet-stream',
         }));
 
+        // ✅ UPDATED: use R2_PUBLIC_URL secret + add expiresAt
         outputs[fmt] = {
-          url: `https://${BUCKET}.r2.dev/${key}`,
+          url: `${R2_PUBLIC_URL}/${key}`,
           size: fileSize,
+          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
         };
 
         console.log(`✅ Uploaded ${fmt}: ${outputs[fmt].url} (${fileSize} bytes)`);
