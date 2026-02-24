@@ -22,13 +22,12 @@ const r2 = new S3Client({
 });
 
 const BUCKET = process.env.R2_BUCKET_NAME;
-const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '355') - 5) * 60 * 1000;
+const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 1000;
 const startTime = Date.now();
 
 async function getNextJob() {
   const snap = await db.collection('jobs')
     .where('status', '==', 'queued')
-    .orderBy('createdAt', 'asc')
     .limit(1)
     .get();
   if (snap.empty) return null;
@@ -36,47 +35,58 @@ async function getNextJob() {
   return { id: doc.id, ...doc.data() };
 }
 
+function buildExportScript(script, outFile, fmt) {
+  const exportLines = {
+    glb: `bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB')`,
+    fbx: `bpy.ops.export_scene.fbx(filepath='${outFile}')`,
+    stl: `bpy.ops.export_mesh.stl(filepath='${outFile}')`,
+    obj: `bpy.ops.export_scene.obj(filepath='${outFile}')`,
+    usd: `bpy.ops.wm.usd_export(filepath='${outFile}')`,
+  };
+
+  return `
+import bpy
+import sys
+
+${script}
+
+try:
+    ${exportLines[fmt]}
+    print("EXPORT_SUCCESS: ${fmt}")
+except Exception as e:
+    print(f"EXPORT_ERROR: {e}", file=sys.stderr)
+    sys.exit(1)
+`;
+}
+
 async function processJob(job) {
   const jobRef = db.collection('jobs').doc(job.id);
   console.log(`Processing job: ${job.id}`);
 
-  // Mark as processing
   await jobRef.update({ status: 'processing', startedAt: Date.now() });
 
   const workDir = `/tmp/job_${job.id}`;
   fs.mkdirSync(workDir, { recursive: true });
-
-  // Write script
-  const scriptPath = path.join(workDir, 'script.py');
-  fs.writeFileSync(scriptPath, job.script);
 
   const outputs = {};
 
   try {
     for (const fmt of job.formats) {
       const outFile = path.join(workDir, `output.${fmt}`);
-
-      // Add export command to script
-      const exportScript = `
-${job.script}
-
-import bpy
-bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB') if '${fmt}' == 'glb' else None
-bpy.ops.export_scene.fbx(filepath='${outFile}') if '${fmt}' == 'fbx' else None
-bpy.ops.export_mesh.stl(filepath='${outFile}') if '${fmt}' == 'stl' else None
-bpy.ops.export_scene.obj(filepath='${outFile}') if '${fmt}' == 'obj' else None
-`;
       const exportScriptPath = path.join(workDir, `export_${fmt}.py`);
-      fs.writeFileSync(exportScriptPath, exportScript);
 
-      // Run Blender headless
-      execSync(
-        `blender --background --python ${exportScriptPath}`,
-        { stdio: 'inherit', timeout: 5 * 60 * 1000 }
-      );
+      fs.writeFileSync(exportScriptPath, buildExportScript(job.script, outFile, fmt));
 
-      if (fs.existsSync(outFile)) {
-        // Upload to R2
+      try {
+        execSync(
+          `blender --background --python ${exportScriptPath}`,
+          { stdio: 'pipe', timeout: 5 * 60 * 1000 }
+        );
+      } catch (blenderErr) {
+        console.error(`Blender error for ${fmt}:`, blenderErr.stderr?.toString());
+      }
+
+      if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
         const key = `jobs/${job.id}/output.${fmt}`;
         await r2.send(new PutObjectCommand({
           Bucket: BUCKET,
@@ -86,19 +96,23 @@ bpy.ops.export_scene.obj(filepath='${outFile}') if '${fmt}' == 'obj' else None
         }));
 
         outputs[fmt] = `https://${BUCKET}.r2.dev/${key}`;
-        console.log(`Uploaded ${fmt}: ${outputs[fmt]}`);
+        console.log(`✅ Uploaded ${fmt}: ${outputs[fmt]}`);
+      } else {
+        console.error(`❌ Export failed for ${fmt} - file not created`);
       }
     }
 
+    const status = Object.keys(outputs).length > 0 ? 'done' : 'failed';
     await jobRef.update({
-      status: 'done',
+      status,
       outputs,
       completedAt: Date.now(),
+      error: status === 'failed' ? 'All exports failed' : null,
     });
-    console.log(`Job ${job.id} completed`);
+    console.log(`Job ${job.id} → ${status}`);
 
   } catch (err) {
-    console.error(`Job ${job.id} failed:`, err);
+    console.error(`Job ${job.id} crashed:`, err);
     await jobRef.update({
       status: 'failed',
       error: err.message,

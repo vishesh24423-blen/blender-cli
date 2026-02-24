@@ -1,8 +1,8 @@
 const admin = require('firebase-admin');
 
-const status = process.argv[2]; // 'active' or 'inactive'
+const status = process.argv[2];
 
-if (!status) {
+if (!status || !['active', 'inactive'].includes(status)) {
   console.error('Usage: node set_runner_status.js <active|inactive>');
   process.exit(1);
 }
@@ -25,6 +25,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Error setting runner status:', err);
+  console.error('Error:', err);
   process.exit(1);
 });
