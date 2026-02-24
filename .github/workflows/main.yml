@@ -23,8 +23,9 @@ jobs:
 
       - name: Install Blender
         run: |
-          sudo snap install blender --classic
-          blender --version
+         sudo apt-get update -qq
+         sudo apt-get install -y blender
+         blender --version
 
       - name: Mark runner ACTIVE
         env:
