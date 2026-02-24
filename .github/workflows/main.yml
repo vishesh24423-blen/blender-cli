@@ -1,8 +1,8 @@
 name: Blender Persistent Worker
 on:
   schedule:
-    - cron: '0 0,6,12,18 * * *'  # every 6h UTC = 5:30AM/11:30AM/5:30PM/11:30PM IST
-  workflow_dispatch:              # manual trigger from GitHub UI
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
 
 jobs:
   worker:
@@ -21,11 +21,14 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Install Blender
+      - name: Install Blender + numpy
         run: |
-         sudo apt-get update -qq
-         sudo apt-get install -y blender
-         blender --version
+          sudo apt-get update -qq
+          sudo apt-get install -y blender python3-numpy
+          blender --version
+          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+          echo "PYTHONPATH=$SITE_PACKAGES" >> $GITHUB_ENV
+          echo "Numpy path: $SITE_PACKAGES"
 
       - name: Mark runner ACTIVE
         env:
@@ -39,11 +42,11 @@ jobs:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-          WINDOW_MINUTES: '355'
+          WINDOW_MINUTES: '350'
         run: node scripts/persistent_worker.js
 
       - name: Mark runner INACTIVE
-        if: always()   # runs even if worker crashes
+        if: always()
         env:
           FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
         run: node scripts/set_runner_status.js inactive
