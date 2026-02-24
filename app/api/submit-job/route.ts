@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import admin from 'firebase-admin';
 
-// Initialize Admin SDK only once
 if (!admin.apps.length) {
     admin.initializeApp({
         credential: admin.credential.cert(
@@ -17,7 +16,6 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { script, formats } = body;
 
-        // Validate
         if (!script || typeof script !== 'string') {
             return NextResponse.json({ error: 'Script is required' }, { status: 400 });
         }
@@ -32,7 +30,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: `Invalid formats: ${invalidFormats.join(', ')}` }, { status: 400 });
         }
 
-        // Create job in Firestore via Admin SDK (bypasses security rules)
         const jobRef = await db.collection('jobs').add({
             script,
             userId: 'anonymous',
@@ -44,13 +41,11 @@ export async function POST(request: NextRequest) {
 
         const jobId = jobRef.id;
 
-        // Trigger GitHub Actions if not already processing
         const githubToken = process.env.GITHUB_TOKEN;
         const githubOwner = process.env.GITHUB_OWNER;
         const githubRepo = process.env.GITHUB_REPO;
 
         if (githubToken && githubOwner && githubRepo) {
-            // Check if any job is currently processing
             const processingSnap = await db.collection('jobs')
                 .where('status', '==', 'processing')
                 .limit(1)
@@ -58,19 +53,22 @@ export async function POST(request: NextRequest) {
 
             if (processingSnap.empty) {
                 try {
-                    const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/blender-worker.yml/dispatches`;
-                    const dispatchRes = await fetch(dispatchUrl, {
+                    const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;
+
+                    const dispatchRes = await fetch(dispatchUrl, {  // ← was missing this line
                         method: 'POST',
                         headers: {
                             Authorization: `Bearer ${githubToken}`,
                             Accept: 'application/vnd.github.v3+json',
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ ref: 'main', inputs: { job_id: jobId } }),
+                        body: JSON.stringify({ ref: 'main' }),  // ← removed job_id input
                     });
 
                     if (!dispatchRes.ok) {
                         console.error('GitHub dispatch failed:', dispatchRes.status, await dispatchRes.text());
+                    } else {
+                        console.log('GitHub Actions triggered successfully');
                     }
                 } catch (ghError) {
                     console.error('GitHub Actions trigger error:', ghError);

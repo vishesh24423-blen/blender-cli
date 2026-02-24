@@ -2,112 +2,132 @@ const admin = require('firebase-admin');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { uploadToR2, getSignedUrl } = require('./upload_r2');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
-admin.initializeApp({
-  credential: admin.credential.cert(
-    JSON.parse(process.env.FIREBASE_CONFIG)
-  )
+// Init Firebase
+const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+if (!admin.apps.length) {
+  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+}
+const db = admin.firestore();
+
+// Init R2
+const r2 = new S3Client({
+  region: 'auto',
+  endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY,
+    secretAccessKey: process.env.R2_SECRET_KEY,
+  },
 });
 
-const db = admin.firestore();
-const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES) || 355) * 60 * 1000;
-const POLL_INTERVAL_MS = 15000; // check every 15 seconds
+const BUCKET = process.env.R2_BUCKET_NAME;
+const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '355') - 5) * 60 * 1000;
 const startTime = Date.now();
 
-const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+async function getNextJob() {
+  const snap = await db.collection('jobs')
+    .where('status', '==', 'queued')
+    .orderBy('createdAt', 'asc')
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  const doc = snap.docs[0];
+  return { id: doc.id, ...doc.data() };
+}
 
-async function processJob(jobDoc) {
-  const job = jobDoc.data();
-  const jobId = jobDoc.id;
-  const formats = job.formats || ['glb']; // default to GLB
-
-  console.log(`⚙️  Processing job: ${jobId} | Formats: ${formats.join(', ')}`);
+async function processJob(job) {
+  const jobRef = db.collection('jobs').doc(job.id);
+  console.log(`Processing job: ${job.id}`);
 
   // Mark as processing
-  await db.collection('system').doc('runner').update({ currentJobId: jobId });
-  await jobDoc.ref.update({ status: 'processing' });
+  await jobRef.update({ status: 'processing', startedAt: Date.now() });
+
+  const workDir = `/tmp/job_${job.id}`;
+  fs.mkdirSync(workDir, { recursive: true });
+
+  // Write script
+  const scriptPath = path.join(workDir, 'script.py');
+  fs.writeFileSync(scriptPath, job.script);
+
+  const outputs = {};
 
   try {
-    // Write user script
-    fs.writeFileSync('/tmp/job_script.py', job.script);
+    for (const fmt of job.formats) {
+      const outFile = path.join(workDir, `output.${fmt}`);
 
-    // Append export commands for each selected format
-    const exportCommands = formats.map(fmt => {
-      switch(fmt) {
-        case 'glb':  return `bpy.ops.export_scene.gltf(filepath='/tmp/${jobId}.glb', export_format='GLB')`;
-        case 'fbx':  return `bpy.ops.export_scene.fbx(filepath='/tmp/${jobId}.fbx')`;
-        case 'stl':  return `bpy.ops.export_mesh.stl(filepath='/tmp/${jobId}.stl')`;
-        case 'obj':  return `bpy.ops.export_scene.obj(filepath='/tmp/${jobId}.obj')`;
-        case 'usd':  return `bpy.ops.wm.usd_export(filepath='/tmp/${jobId}.usdc')`;
-        default:     return '';
-      }
-    }).filter(Boolean);
+      // Add export command to script
+      const exportScript = `
+${job.script}
 
-    fs.appendFileSync('/tmp/job_script.py', `\nimport bpy\n${exportCommands.join('\n')}\n`);
+import bpy
+bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB') if '${fmt}' == 'glb' else None
+bpy.ops.export_scene.fbx(filepath='${outFile}') if '${fmt}' == 'fbx' else None
+bpy.ops.export_mesh.stl(filepath='${outFile}') if '${fmt}' == 'stl' else None
+bpy.ops.export_scene.obj(filepath='${outFile}') if '${fmt}' == 'obj' else None
+`;
+      const exportScriptPath = path.join(workDir, `export_${fmt}.py`);
+      fs.writeFileSync(exportScriptPath, exportScript);
 
-    // Run Blender
-    execSync('blender -b --python /tmp/job_script.py', {
-      timeout: 120000,
-      stdio: 'inherit'
-    });
+      // Run Blender headless
+      execSync(
+        `blender --background --python ${exportScriptPath}`,
+        { stdio: 'inherit', timeout: 5 * 60 * 1000 }
+      );
 
-    // Upload each format to R2
-    const outputs = {};
-    for (const fmt of formats) {
-      const filePath = `/tmp/${jobId}.${fmt}`;
-      if (fs.existsSync(filePath)) {
-        const r2Key = `outputs/${jobId}.${fmt}`;
-        await uploadToR2(filePath, r2Key, fmt);
-        const url = await getSignedUrl(r2Key);
-        const size = fs.statSync(filePath).size;
-        outputs[fmt] = { url, size, type: 'single' };
-        console.log(`✅ Uploaded ${fmt}: ${(size/1024/1024).toFixed(1)}MB`);
+      if (fs.existsSync(outFile)) {
+        // Upload to R2
+        const key = `jobs/${job.id}/output.${fmt}`;
+        await r2.send(new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: key,
+          Body: fs.readFileSync(outFile),
+          ContentType: 'application/octet-stream',
+        }));
+
+        outputs[fmt] = `https://${BUCKET}.r2.dev/${key}`;
+        console.log(`Uploaded ${fmt}: ${outputs[fmt]}`);
       }
     }
 
-    // Mark job done
-    await jobDoc.ref.update({
+    await jobRef.update({
       status: 'done',
       outputs,
-      completedAt: Date.now()
+      completedAt: Date.now(),
     });
-
-    console.log(`✅ Job ${jobId} completed`);
+    console.log(`Job ${job.id} completed`);
 
   } catch (err) {
-    console.error(`❌ Job ${jobId} failed:`, err.message);
-    await jobDoc.ref.update({
+    console.error(`Job ${job.id} failed:`, err);
+    await jobRef.update({
       status: 'failed',
       error: err.message,
-      completedAt: Date.now()
+      completedAt: Date.now(),
     });
+  } finally {
+    fs.rmSync(workDir, { recursive: true, force: true });
   }
-
-  // Clear current job
-  await db.collection('system').doc('runner').update({ currentJobId: null });
 }
 
-async function pollQueue() {
-  console.log(`🚀 Worker started. Window: ${WINDOW_MS / 60000} minutes`);
+async function main() {
+  console.log(`Worker started. Window: ${WINDOW_MS / 60000} minutes`);
 
   while (Date.now() - startTime < WINDOW_MS) {
-    const snapshot = await db.collection('jobs')
-      .where('status', '==', 'queued')
-      .orderBy('createdAt', 'asc')
-      .limit(1)
-      .get();
+    const job = await getNextJob();
 
-    if (!snapshot.empty) {
-      await processJob(snapshot.docs[0]);
+    if (job) {
+      await processJob(job);
     } else {
-      const remaining = Math.round((WINDOW_MS - (Date.now() - startTime)) / 60000);
-      console.log(`💤 Queue empty. ${remaining} min remaining. Polling in 15s...`);
-      await sleep(POLL_INTERVAL_MS);
+      console.log('No queued jobs. Waiting 30s...');
+      await new Promise(res => setTimeout(res, 30000));
     }
   }
 
-  console.log('⏱️ Window expired. Shutting down.');
+  console.log('Worker window closing.');
+  process.exit(0);
 }
 
-pollQueue();
+main().catch((err) => {
+  console.error('Worker crashed:', err);
+  process.exit(1);
+});
