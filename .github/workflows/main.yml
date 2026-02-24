@@ -1,16 +1,34 @@
-name: Blender Persistent Worker
+name: Blender Job Runner
+
 on:
-  schedule:
-    - cron: '0 */12 * * *'
   workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'Job ID from Firestore'
+        required: true
+      script:
+        description: 'Python script content (base64)'
+        required: true
+      format:
+        description: 'Output format (glb, obj, fbx)'
+        required: true
+        default: 'glb'
+
+env:
+  R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+  R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+  R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+  CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+  FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
+  R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
 
 jobs:
-  worker:
+  render:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -18,35 +36,24 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Node dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Install Blender + numpy
+      - name: Install Blender
+        run: sudo snap install blender --classic
+
+      - name: Decode script
+        run: echo "${{ github.event.inputs.script }}" | base64 -d > /tmp/script.py
+
+      - name: Run Blender
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y blender python3-numpy
-          blender --version
-          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
-          echo "PYTHONPATH=$SITE_PACKAGES" >> $GITHUB_ENV
-          echo "Numpy path: $SITE_PACKAGES"
+          blender --background --python /tmp/script.py -- \
+            --output /tmp/output \
+            --format ${{ github.event.inputs.format }}
 
-      - name: Mark runner ACTIVE
+      - name: Upload to R2 and update Firestore
+        run: node persistent_worker.js
         env:
-          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
-        run: node scripts/set_runner_status.js active
-
-      - name: Run persistent queue worker
-        env:
-          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
-          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-          WINDOW_MINUTES: '350'
-        run: node scripts/persistent_worker.js
-
-      - name: Mark runner INACTIVE
-        if: always()
-        env:
-          FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
-        run: node scripts/set_runner_status.js inactive
+          JOB_ID: ${{ github.event.inputs.job_id }}
+          FORMAT: ${{ github.event.inputs.format }}
+          OUTPUT_PATH: /tmp/output.${{ github.event.inputs.format }}
