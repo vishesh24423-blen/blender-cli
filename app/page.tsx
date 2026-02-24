@@ -1,65 +1,70 @@
-import Image from "next/image";
+import RunnerStatus from '@/components/RunnerStatus';
+import ScriptSubmitForm from '@/components/ScriptSubmitForm';
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      {/* Hero */}
+      <section className="hero">
+        <div className="hero-badge">
+          <span>⚡</span>
+          Powered by Blender + GitHub Actions
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <h1 className="hero-title">
+          Generate 3D Assets<br />from Python Scripts
+        </h1>
+
+        <p className="hero-subtitle">
+          Write a Blender Python script, choose your output formats, and let our
+          headless Blender pipeline generate production-ready 3D models for you.
+        </p>
+
+        {/* Runner Status */}
+        <RunnerStatus />
+      </section>
+
+      {/* Submit Form */}
+      <ScriptSubmitForm />
+
+      {/* Features */}
+      <section className="features">
+        <h2 className="features-title">How it works</h2>
+        <div className="features-grid">
+          <div className="feature-card">
+            <div className="feature-icon" style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
+              📝
+            </div>
+            <h3 className="feature-name">Write Script</h3>
+            <p className="feature-desc">
+              Write your Blender Python script using the full bpy API.
+              Create meshes, materials, animations — anything Blender can do.
+            </p>
+          </div>
+
+          <div className="feature-card">
+            <div className="feature-icon" style={{ background: 'var(--accent-purple-dim)', color: 'var(--accent-purple)' }}>
+              ⚙️
+            </div>
+            <h3 className="feature-name">Queue & Process</h3>
+            <p className="feature-desc">
+              Your script is queued and executed by Blender running headlessly
+              on a GitHub Actions runner with full GPU support.
+            </p>
+          </div>
+
+          <div className="feature-card">
+            <div className="feature-icon" style={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)' }}>
+              📦
+            </div>
+            <h3 className="feature-name">Download Files</h3>
+            <p className="feature-desc">
+              Get your 3D models in GLB, FBX, STL, OBJ, or USD format.
+              Files are hosted on Cloudflare R2 for fast global downloads.
+            </p>
+          </div>
         </div>
-      </main>
-    </div>
+      </section>
+    </>
   );
 }
