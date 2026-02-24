@@ -2,17 +2,6 @@ name: Blender Job Runner
 
 on:
   workflow_dispatch:
-    inputs:
-      job_id:
-        description: 'Job ID from Firestore'
-        required: true
-      script:
-        description: 'Python script content (base64)'
-        required: true
-      format:
-        description: 'Output format (glb, obj, fbx)'
-        required: true
-        default: 'glb'
 
 env:
   R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
@@ -21,11 +10,12 @@ env:
   CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
   FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
   R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+  WINDOW_MINUTES: '350'
 
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -42,18 +32,5 @@ jobs:
       - name: Install Blender
         run: sudo snap install blender --classic
 
-      - name: Decode script
-        run: echo "${{ github.event.inputs.script }}" | base64 -d > /tmp/script.py
-
-      - name: Run Blender
-        run: |
-          blender --background --python /tmp/script.py -- \
-            --output /tmp/output \
-            --format ${{ github.event.inputs.format }}
-
-      - name: Upload to R2 and update Firestore
+      - name: Run Worker
         run: node persistent_worker.js
-        env:
-          JOB_ID: ${{ github.event.inputs.job_id }}
-          FORMAT: ${{ github.event.inputs.format }}
-          OUTPUT_PATH: /tmp/output.${{ github.event.inputs.format }}
