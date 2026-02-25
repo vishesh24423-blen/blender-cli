@@ -22,7 +22,7 @@ const r2 = new S3Client({
 });
 
 const BUCKET = process.env.R2_BUCKET_NAME;
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL; // ✅ UPDATED: use secret
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL;
 const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 1000;
 const startTime = Date.now();
 
@@ -38,24 +38,29 @@ async function getNextJob() {
 
 function buildExportScript(script, outFile, fmt) {
   const exportLines = {
-    glb: `bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB')`,
-    fbx: `bpy.ops.export_scene.fbx(filepath='${outFile}')`,
-    stl: `bpy.ops.export_mesh.stl(filepath='${outFile}')`,
-    obj: `bpy.ops.export_scene.obj(filepath='${outFile}')`,
-    usd: `bpy.ops.wm.usd_export(filepath='${outFile}')`,
+    glb: `bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB', export_selected=True, export_materials='EXPORT')`,
+    fbx: `bpy.ops.export_scene.fbx(filepath='${outFile}', use_selection=True)`,
+    stl: `bpy.ops.export_mesh.stl(filepath='${outFile}', use_selection=True)`,
+    obj: `bpy.ops.wm.obj_export(filepath='${outFile}', export_selected_objects=True, export_materials=True)`, 
+    usd: `bpy.ops.wm.usd_export(filepath='${outFile}', selected_objects_only=True)`,
   };
 
   return `
 import bpy
 import sys
 
+bpy.ops.object.select_all(action='DESELECT')
+
 ${script}
+
+bpy.context.view_layer.objects.active = bpy.context.active_object
+bpy.context.active_object.select_set(True)
 
 try:
     ${exportLines[fmt]}
     print("EXPORT_SUCCESS: ${fmt}")
 except Exception as e:
-    print(f"EXPORT_ERROR: {e}", file=sys.stderr)
+    print(f"EXPORT_ERROR: ${fmt}: {e}", file=sys.stderr)
     sys.exit(1)
 `;
 }
@@ -70,9 +75,12 @@ async function processJob(job) {
   fs.mkdirSync(workDir, { recursive: true });
 
   const outputs = {};
+  let successCount = 0;
 
   try {
     for (const fmt of job.formats) {
+      if (fmt === 'obj') continue;  // ❌ SKIP OBJ - broken in Blender 5.0 snap
+
       const outFile = path.join(workDir, `output.${fmt}`);
       const exportScriptPath = path.join(workDir, `export_${fmt}.py`);
 
@@ -81,22 +89,20 @@ async function processJob(job) {
       try {
         execSync(
           `blender --background --python ${exportScriptPath}`,
-          { stdio: 'pipe', timeout: 5 * 60 * 1000 }
+          { stdio: 'pipe', timeout: 120 * 1000, cwd: workDir }  // 2min timeout
         );
       } catch (blenderErr) {
         console.error(`Blender error for ${fmt}:`, blenderErr.stderr?.toString());
       }
 
-      if (fs.existsSync(outFile) && fs.statSync(outFile).size > 0) {
+      if (fs.existsSync(outFile) && fs.statSync(outFile).size > 1000) {
         const key = `jobs/${job.id}/output.${fmt}`;
         const fileSize = fs.statSync(outFile).size;
 
-        // ✅ UPDATED: correct MIME types per format
         const contentTypes = {
           glb: 'model/gltf-binary',
           fbx: 'application/octet-stream',
           stl: 'model/stl',
-          obj: 'model/obj',
           usd: 'application/octet-stream',
         };
 
@@ -107,7 +113,6 @@ async function processJob(job) {
           ContentType: contentTypes[fmt] || 'application/octet-stream',
         }));
 
-        // ✅ UPDATED: use R2_PUBLIC_URL secret + add expiresAt
         outputs[fmt] = {
           url: `${R2_PUBLIC_URL}/${key}`,
           size: fileSize,
@@ -115,21 +120,22 @@ async function processJob(job) {
         };
 
         console.log(`✅ Uploaded ${fmt}: ${outputs[fmt].url} (${fileSize} bytes)`);
+        successCount++;
       } else {
         console.error(`❌ Export failed for ${fmt} - file not created`);
       }
     }
 
-    const status = Object.keys(outputs).length > 0 ? 'done' : 'failed';
+    const status = successCount > 0 ? 'done' : 'failed';
 
     await jobRef.update({
       status,
       outputs,
       completedAt: Date.now(),
-      error: status === 'failed' ? 'All exports failed' : null,
+      error: status === 'failed' ? 'No valid exports created (GLB recommended)' : null,
     });
 
-    console.log(`Job ${job.id} → ${status}`);
+    console.log(`Job ${job.id} → ${status} (${successCount}/${job.formats.length} formats)`);
 
   } catch (err) {
     console.error(`Job ${job.id} crashed:`, err);
@@ -145,6 +151,7 @@ async function processJob(job) {
 
 async function main() {
   console.log(`Worker started. Window: ${WINDOW_MS / 60000} minutes`);
+  console.log('Formats: GLB/FBX/STL/USD only (OBJ disabled - Blender 5.0 bug)');
 
   while (Date.now() - startTime < WINDOW_MS) {
     const job = await getNextJob();
