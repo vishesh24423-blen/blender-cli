@@ -1,5 +1,6 @@
 import RunnerStatus from '@/components/RunnerStatus';
 import ScriptSubmitForm from '@/components/ScriptSubmitForm';
+import Link from 'next/link';
 
 export default function HomePage() {
   return (
@@ -22,10 +23,45 @@ export default function HomePage() {
 
         {/* Runner Status */}
         <RunnerStatus />
+
+        {/* Guide CTA */}
+        <div style={{ marginTop: '24px' }}>
+          <Link
+            href="/guide"
+            style={{
+              display: 'inline-block',
+              padding: '10px 20px',
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2))',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              borderRadius: '8px',
+              color: '#3b82f6',
+              textDecoration: 'none',
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+          >
+            📚 Read Script Writing Guide
+          </Link>
+        </div>
       </section>
 
-      {/* Submit Form */}
-      <ScriptSubmitForm />
+      {/* Info Section */}
+      <section style={{ marginBottom: '60px', marginTop: '60px' }}>
+        <div
+          style={{
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1))',
+            border: '1px solid rgba(59, 130, 246, 0.2)',
+            padding: '32px',
+            textAlign: 'center',
+          }}
+        >
+          <h2 style={{ margin: '0 0 12px 0', fontSize: '18px', color: '#fff' }}>New to BlenderLab?</h2>
+          <p style={{ margin: 0, color: '#888', fontSize: '14px', maxWidth: '600px', marginLeft: 'auto', marginRight: 'auto' }}>
+            Check out our comprehensive guide with examples, best practices, and common patterns to write production-ready 3D asset generation scripts.
+          </p>
+        </div>
+      </section>
 
       {/* Features */}
       <section className="features">
@@ -65,6 +101,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Submit Form */}
+      <ScriptSubmitForm />
     </>
   );
 }

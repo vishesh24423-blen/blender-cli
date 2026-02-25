@@ -40,6 +40,9 @@ export default function RootLayout({
                 </div>
               </Link>
               <div className="header-links">
+                <Link href="/guide" className="header-link">
+                  📚 Guide
+                </Link>
                 <a
                   href="https://github.com"
                   target="_blank"
