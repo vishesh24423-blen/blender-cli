@@ -42,14 +42,32 @@ export async function POST(request: NextRequest) {
 
         const jobId = jobRef.id;
 
-        // 2. Check runner status in `runners/active`
+        // 2. Check and activate runner using Transaction
         try {
-            const runnerDocRef = db.collection('runners').doc('active');
-            const runnerDoc = await runnerDocRef.get();
-            const runnerStatus = runnerDoc.exists ? runnerDoc.data()?.status ?? 'inactive' : 'inactive';
+            const runnerDocRef = db.collection('system').doc('runner');
 
-            // 3. Only trigger workflow if runner is not active
-            if (runnerStatus !== 'active') {
+            let shouldTriggerWorkflow = false;
+
+            await db.runTransaction(async (transaction) => {
+                const runnerDoc = await transaction.get(runnerDocRef);
+                const runnerData = runnerDoc.data();
+
+                const runnerStatus = runnerData?.status ?? 'inactive';
+                const lastActive = runnerData?.lastActive ?? 0;
+                const isStale = Date.now() - lastActive > 5 * 60 * 1000; // 5 minutes
+
+                if (runnerStatus !== 'active' || isStale) {
+                    shouldTriggerWorkflow = true;
+                    // Pre-emptively set to active so other transactions see it's "taken"
+                    transaction.set(runnerDocRef, {
+                        status: 'active',
+                        startedAt: Date.now(),
+                        lastActive: Date.now(), // Initial heartbeat
+                    }, { merge: true });
+                }
+            });
+
+            if (shouldTriggerWorkflow) {
                 const githubToken = process.env.GITHUB_TOKEN;
                 const githubOwner = process.env.GITHUB_OWNER;
                 const githubRepo = process.env.GITHUB_REPO;
@@ -69,24 +87,25 @@ export async function POST(request: NextRequest) {
                         });
 
                         if (dispatchRes.ok) {
-                            console.log(`✅ Workflow triggered for job ${jobId} — runner was inactive`);
-                            // Mark runner as active so subsequent jobs don't re-trigger
-                            await runnerDocRef.set({
-                                status: 'active',
-                                startedAt: Date.now(),
-                            });
+                            console.log(`✅ Workflow triggered for job ${jobId} — runner was inactive/stale`);
                         } else {
-                            console.error(`⚠️ Failed to trigger workflow: ${dispatchRes.status}`, await dispatchRes.text());
+                            const errorText = await dispatchRes.text();
+                            console.error(`⚠️ Failed to trigger workflow: ${dispatchRes.status}`, errorText);
+                            // Rollback runner status if trigger failed? 
+                            // Actually, better to leave it 'active' or 'failed'? 
+                            // If it's stale, it will be retried by the next job anyway.
+                            await runnerDocRef.update({ status: 'inactive' });
                         }
                     } catch (ghError) {
                         console.error('⚠️ GitHub workflow trigger failed:', ghError);
+                        await runnerDocRef.update({ status: 'inactive' });
                     }
                 }
             } else {
                 console.log(`✅ Job ${jobId} queued — runner already active`);
             }
         } catch (runnerCheckError) {
-            console.error('⚠️ Failed to check runner status:', runnerCheckError);
+            console.error('⚠️ Transaction/Runner check failed:', runnerCheckError);
         }
 
         return NextResponse.json({ jobId }, { status: 201 });

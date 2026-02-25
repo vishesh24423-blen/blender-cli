@@ -91,6 +91,15 @@ async function processJob(job) {
 
   await jobRef.update({ status: 'processing', startedAt: Date.now() });
 
+  // Heartbeat/Status update
+  await db.collection('system').doc('runner').set({
+    status: 'active',
+    lastActive: Date.now(),
+    startedAt: startTime,
+    windowEndsAt: startTime + WINDOW_MS,
+    currentJobId: job.id
+  }, { merge: true });
+
   const workDir = `/tmp/job_${job.id}`;
   fs.mkdirSync(workDir, { recursive: true });
 
@@ -141,6 +150,11 @@ async function processJob(job) {
 
         console.log(`✅ Uploaded ${fmt}: ${outputs[fmt].url} (${fileSize} bytes)`);
         successCount++;
+
+        // Lightweight heartbeat update during loop
+        await db.collection('system').doc('runner').update({
+          lastActive: Date.now(),
+        }).catch(e => console.error('Heartbeat update failed:', e));
       } else {
         console.error(`❌ Export failed for ${fmt} - file not created`);
       }
@@ -174,6 +188,14 @@ async function main() {
   console.log('Formats: GLB/FBX/STL/USD only (OBJ disabled - Blender 5.0 bug)');
 
   while (Date.now() - startTime < WINDOW_MS) {
+    // Basic idle heartbeat
+    await db.collection('system').doc('runner').set({
+      status: 'active',
+      lastActive: Date.now(),
+      startedAt: startTime,
+      windowEndsAt: startTime + WINDOW_MS
+    }, { merge: true });
+
     const job = await getNextJob();
 
     if (job) {
@@ -185,6 +207,10 @@ async function main() {
   }
 
   console.log('Worker window closing.');
+  await db.collection('system').doc('runner').set({
+    status: 'inactive',
+    lastActive: Date.now()
+  }, { merge: true });
   process.exit(0);
 }
 
