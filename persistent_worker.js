@@ -5,7 +5,12 @@ const path = require('path');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 // Init Firebase
-const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+// Prefer FIREBASE_CONFIG (used in GitHub Actions), but fall back to FIREBASE_SERVICE_ACCOUNT_KEY for local runs
+const serviceAccountJson = process.env.FIREBASE_CONFIG || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+if (!serviceAccountJson) {
+  throw new Error('Missing Firebase config: set FIREBASE_CONFIG or FIREBASE_SERVICE_ACCOUNT_KEY');
+}
+const serviceAccount = JSON.parse(serviceAccountJson);
 if (!admin.apps.length) {
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
@@ -37,11 +42,23 @@ async function getNextJob() {
 }
 
 function buildExportScript(script, outFile, fmt) {
+  // Normalize and patch user script for Blender 5.x
+  const rawScript = script == null ? '' : String(script);
+  // Replace legacy glTF param everywhere: export_selected → use_selection
+  const patchedScript = rawScript.replace(/export_selected/g, 'use_selection');
+
+  // Indent user script so it can live inside a try: block
+  const indentedScript = patchedScript
+    .split('\n')
+    .map(line => `    ${line}`)
+    .join('\n');
+
   const exportLines = {
-    glb: `bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB', export_selected=True, export_materials='EXPORT')`,
+    // Blender 5.x: use_selection instead of export_selected
+    glb: `bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB', use_selection=True, export_materials='EXPORT')`,
     fbx: `bpy.ops.export_scene.fbx(filepath='${outFile}', use_selection=True)`,
     stl: `bpy.ops.export_mesh.stl(filepath='${outFile}', use_selection=True)`,
-    obj: `bpy.ops.wm.obj_export(filepath='${outFile}', export_selected_objects=True, export_materials=True)`, 
+    obj: `bpy.ops.wm.obj_export(filepath='${outFile}', export_selected_objects=True, export_materials=True)`,
     usd: `bpy.ops.wm.usd_export(filepath='${outFile}', selected_objects_only=True)`,
   };
 
@@ -51,7 +68,10 @@ import sys
 
 bpy.ops.object.select_all(action='DESELECT')
 
-${script}
+try:
+${indentedScript}
+except Exception as e:
+    print(f"USER_SCRIPT_ERROR: {e}", file=sys.stderr)
 
 bpy.context.view_layer.objects.active = bpy.context.active_object
 bpy.context.active_object.select_set(True)
