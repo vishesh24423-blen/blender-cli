@@ -138,10 +138,18 @@ bevel.width = 0.05
 print("Finalizing...")
 bpy.ops.object.shade_smooth()
 
-# ========== YOUR CODE ENDS HERE ==========
+# ========== CRITICAL: SELECT ALL MESH OBJECTS FOR EXPORT ==========
+# BlenderLab needs all mesh objects selected to export them properly!
+for obj in bpy.data.objects:
+    obj.select_set(False)
+
+for obj in bpy.data.objects:
+    if obj.type == 'MESH':
+        obj.select_set(True)
 
 # Optional: Print status
 print("✅ Asset created successfully!")
+```
 ```
 
 ---

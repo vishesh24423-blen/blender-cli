@@ -94,6 +94,7 @@ export default function ScriptSubmitForm() {
                 <ul style={{ margin: 0, paddingLeft: '16px' }}>
                     <li>✅ Create mesh objects with <code style={{ background: 'rgba(0,0,0,0.1)', padding: '2px 4px' }}>bpy.ops.mesh.*</code></li>
                     <li>✅ Add materials & modifiers for polish</li>
+                    <li>✅ <strong>Select all mesh objects at the end</strong> for BlenderLab to export them</li>
                     <li>❌ Skip scene clearing, export code, render settings</li>
                     <li>🔗 See <a href="/SCRIPT_WRITING_GUIDE.md" style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}>Script Guide</a> for details</li>
                 </ul>

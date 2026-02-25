@@ -357,6 +357,7 @@ bevel.segments = 3`,
                   '✅ Always use descriptive object names (cube.name = "MyObject")',
                   '✅ Call bpy.ops.object.shade_smooth() on mesh objects for better quality',
                   '✅ Use materials to add color and realism to your models',
+                  '🔴 SELECT ALL MESH OBJECTS AT THE END — This is critical for BlenderLab to export them!',
                   '✅ Test your script locally in Blender before submitting to BlenderLab',
                   '✅ Use print() statements to debug and understand what your script is doing',
                   '✅ Create multiple objects if needed — BlenderLab will export all of them',
@@ -365,11 +366,16 @@ bevel.segments = 3`,
                     key={idx}
                     style={{
                       padding: '12px 16px',
-                      background: 'rgba(59, 130, 246, 0.05)',
-                      border: '1px solid rgba(59, 130, 246, 0.2)',
+                      background: tip.includes('SELECT ALL MESH') 
+                        ? 'rgba(239, 68, 68, 0.08)' 
+                        : 'rgba(59, 130, 246, 0.05)',
+                      border: tip.includes('SELECT ALL MESH')
+                        ? '1px solid rgba(239, 68, 68, 0.3)'
+                        : '1px solid rgba(59, 130, 246, 0.2)',
                       borderRadius: '6px',
                       fontSize: '13px',
-                      color: '#94adc8',
+                      color: tip.includes('SELECT ALL MESH') ? '#fca5a5' : '#94adc8',
+                      fontWeight: tip.includes('SELECT ALL MESH') ? 600 : 400,
                     }}
                   >
                     {tip}
