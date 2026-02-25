@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: `Invalid formats: ${invalidFormats.join(', ')}` }, { status: 400 });
         }
 
-        // 1. Create job in Firestore
+        // 1. Create job in Firestore (always queued)
         const jobRef = await db.collection('jobs').add({
             script,
             userId: 'anonymous',
@@ -42,13 +42,14 @@ export async function POST(request: NextRequest) {
 
         const jobId = jobRef.id;
 
-        // 2. Check runner status
+        // 2. Check runner status in `runners/active`
         try {
-            const runnerDoc = await db.collection('system').doc('runner').get();
-            const runnerStatus = runnerDoc.data()?.status ?? 'inactive';
+            const runnerDocRef = db.collection('runners').doc('active');
+            const runnerDoc = await runnerDocRef.get();
+            const runnerStatus = runnerDoc.exists ? runnerDoc.data()?.status ?? 'inactive' : 'inactive';
 
-            // 3. Only trigger workflow if runner is inactive
-            if (runnerStatus === 'inactive') {
+            // 3. Only trigger workflow if runner is not active
+            if (runnerStatus !== 'active') {
                 const githubToken = process.env.GITHUB_TOKEN;
                 const githubOwner = process.env.GITHUB_OWNER;
                 const githubRepo = process.env.GITHUB_REPO;
@@ -69,6 +70,11 @@ export async function POST(request: NextRequest) {
 
                         if (dispatchRes.ok) {
                             console.log(`✅ Workflow triggered for job ${jobId} — runner was inactive`);
+                            // Mark runner as active so subsequent jobs don't re-trigger
+                            await runnerDocRef.set({
+                                status: 'active',
+                                startedAt: Date.now(),
+                            });
                         } else {
                             console.error(`⚠️ Failed to trigger workflow: ${dispatchRes.status}`, await dispatchRes.text());
                         }

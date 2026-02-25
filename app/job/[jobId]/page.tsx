@@ -117,7 +117,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                                 gap: '4px'
                             }}>
                                 <span style={{ fontSize: '14px', fontWeight: 500 }}>
-                                    ⏳ Runner is idle
+                                ⏳ Runner is idle
                                 </span>
                                 <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
                                     Next activation in: <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
