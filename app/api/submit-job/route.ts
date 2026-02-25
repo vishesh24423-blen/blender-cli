@@ -74,6 +74,29 @@ export async function POST(request: NextRequest) {
 
                 if (githubToken && githubOwner && githubRepo) {
                     try {
+                        // --- SECONDARY GUARD: Check GitHub API for active runs ---
+                        const runsUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/runs?status=queued,in_progress&per_page=1`;
+                        const runsRes = await fetch(runsUrl, {
+                            headers: {
+                                Authorization: `Bearer ${githubToken}`,
+                                Accept: 'application/vnd.github+json',
+                            },
+                        });
+
+                        if (runsRes.ok) {
+                            const runsData = await runsRes.json();
+                            if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
+                                console.log(`⏩ Workflow already active on GitHub for job ${jobId}. Syncing Firestore.`);
+                                // Run is already there, just ensure Firestore stays active
+                                await runnerDocRef.set({
+                                    status: 'active',
+                                    lastActive: Date.now(),
+                                }, { merge: true });
+                                return NextResponse.json({ jobId }, { status: 201 });
+                            }
+                        }
+
+                        // --- TRIGGER WORKFLOW ---
                         const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;
 
                         const dispatchRes = await fetch(dispatchUrl, {
@@ -91,13 +114,10 @@ export async function POST(request: NextRequest) {
                         } else {
                             const errorText = await dispatchRes.text();
                             console.error(`⚠️ Failed to trigger workflow: ${dispatchRes.status}`, errorText);
-                            // Rollback runner status if trigger failed? 
-                            // Actually, better to leave it 'active' or 'failed'? 
-                            // If it's stale, it will be retried by the next job anyway.
                             await runnerDocRef.update({ status: 'inactive' });
                         }
                     } catch (ghError) {
-                        console.error('⚠️ GitHub workflow trigger failed:', ghError);
+                        console.error('⚠️ GitHub API check/trigger failed:', ghError);
                         await runnerDocRef.update({ status: 'inactive' });
                     }
                 }

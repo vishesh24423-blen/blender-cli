@@ -15,20 +15,26 @@ const FORMATS: { id: OutputFormat; label: string }[] = [
 
 const SAMPLE_SCRIPT = `import bpy
 
-# Clear default objects
-bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete()
-
 # Create a cube
 bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
-bpy.context.object.name = "MyCube"
+cube = bpy.context.active_object
+cube.name = "MyCube"
 
-# Add a smooth modifier
-bpy.ops.object.modifier_add(type='SUBSURF')
+# Subdivide for smoother appearance
+bpy.context.object.modifiers.new("Subdivision", 'SUBSURF')
 bpy.context.object.modifiers["Subdivision"].levels = 2
 
-# Set smooth shading
-bpy.ops.object.shade_smooth()`;
+# Apply smooth shading
+bpy.ops.object.shade_smooth()
+
+# Add a simple material
+mat = bpy.data.materials.new("CubeMaterial")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes['Principled BSDF']
+bsdf.inputs['Base Color'].default_value = (0.1, 0.5, 0.9, 1.0)
+bsdf.inputs['Roughness'].default_value = 0.5
+cube.data.materials.append(mat)
+`;
 
 export default function ScriptSubmitForm() {
     const router = useRouter();
@@ -72,6 +78,27 @@ export default function ScriptSubmitForm() {
 
     return (
         <div className="submit-form">
+            {/* Instructions */}
+            <div style={{ 
+                padding: '16px 20px',
+                background: 'var(--accent-blue-dim)',
+                border: '1px solid rgba(59, 130, 246, 0.2)',
+                borderRadius: 'var(--radius-sm)',
+                marginBottom: '20px',
+                fontSize: '13px',
+                lineHeight: '1.6'
+            }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--accent-blue)' }}>
+                    💡 Quick Tips:
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '16px' }}>
+                    <li>✅ Create mesh objects with <code style={{ background: 'rgba(0,0,0,0.1)', padding: '2px 4px' }}>bpy.ops.mesh.*</code></li>
+                    <li>✅ Add materials & modifiers for polish</li>
+                    <li>❌ Skip scene clearing, export code, render settings</li>
+                    <li>🔗 See <a href="/SCRIPT_WRITING_GUIDE.md" style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}>Script Guide</a> for details</li>
+                </ul>
+            </div>
+
             {/* Code Editor */}
             <div className="editor-wrapper">
                 <div className="editor-header">
