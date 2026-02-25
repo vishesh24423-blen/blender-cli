@@ -45,6 +45,9 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Submit Form - NOW AT TOP */}
+      <ScriptSubmitForm />
+
       {/* Info Section */}
       <section style={{ marginBottom: '60px', marginTop: '60px' }}>
         <div
@@ -101,9 +104,6 @@ export default function HomePage() {
           </div>
         </div>
       </section>
-
-      {/* Submit Form */}
-      <ScriptSubmitForm />
     </>
   );
 }
