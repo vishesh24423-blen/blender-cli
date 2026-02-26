@@ -61,8 +61,13 @@ async function getNextJob() {
 
 async function processJob(job) {
   const ref = db.collection('jobs').doc(job.id);
+  const runnerRef = db.collection('system').doc('runner');
+  
   await ref.update({ status: 'processing', startedAt: Date.now() });
   console.log(`▶ Job ${job.id}`);
+
+  // Update runner heartbeat before processing
+  await runnerRef.update({ lastActive: Date.now() });
 
   const workDir = `/tmp/job_${job.id}`;
   fs.mkdirSync(workDir, { recursive: true });
@@ -113,18 +118,49 @@ async function processJob(job) {
     console.error(`Job crashed:`, err);
     await ref.update({ status: 'failed', error: err.message, completedAt: Date.now() });
   } finally {
+    // Update runner heartbeat after processing
+    await runnerRef.update({ lastActive: Date.now() });
     fs.rmSync(workDir, { recursive: true, force: true });
   }
 }
 
 async function main() {
+  const runnerRef = db.collection('system').doc('runner');
+  const now = Date.now();
+
   console.log(`🚀 Worker started. Window: ${WINDOW_MS / 60000}min`);
+  console.log(`📊 Setting runner to ACTIVE...`);
+
+  // Mark runner as active
+  await runnerRef.set({
+    status: 'active',
+    startedAt: now,
+    lastActive: now,
+    windowEndsAt: now + WINDOW_MS,
+  }, { merge: true });
+
+  let jobCount = 0;
+
   while (Date.now() - startTime < WINDOW_MS) {
+    // Send heartbeat every 30 seconds
+    await runnerRef.update({ lastActive: Date.now() });
+
     const job = await getNextJob();
-    if (job) await processJob(job);
-    else { console.log('⏳ Waiting 30s...'); await new Promise(r => setTimeout(r, 30000)); }
+    if (job) {
+      jobCount++;
+      await processJob(job);
+    } else {
+      console.log('⏳ Waiting 30s for next job...'); 
+      await new Promise(r => setTimeout(r, 30000));
+    }
   }
-  console.log('🛑 Window closed.');
+
+  console.log(`🛑 Window closed. Processed ${jobCount} jobs.`);
+  await runnerRef.set({
+    status: 'inactive',
+    lastActive: Date.now(),
+  }, { merge: true });
+
   process.exit(0);
 }
 
