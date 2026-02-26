@@ -92,52 +92,65 @@ export async function POST(request: NextRequest) {
                 const githubOwner = process.env.GITHUB_OWNER;
                 const githubRepo = process.env.GITHUB_REPO;
 
-                if (githubToken && githubOwner && githubRepo) {
+                // Check if all GitHub env vars are present
+                if (!githubToken || !githubOwner || !githubRepo) {
+                    console.error(`⚠️ Cannot trigger workflow: Missing GitHub config. Token=${!!githubToken}, Owner=${!!githubOwner}, Repo=${!!githubRepo}`);
+                    console.error(`ℹ️  Set GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO in Vercel environment to enable auto-trigger`);
+                } else {
                     try {
                         // --- SECONDARY GUARD: Check GitHub API for active runs ---
                         const runsUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/runs?status=queued,in_progress&per_page=1`;
-                        const runsRes = await fetch(runsUrl, {
-                            headers: {
-                                Authorization: `Bearer ${githubToken}`,
-                                Accept: 'application/vnd.github+json',
-                            },
-                        });
+                        let hasActiveRun = false;
 
-                        if (runsRes.ok) {
-                            const runsData = await runsRes.json();
-                            if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
-                                console.log(`⏩ Workflow already active on GitHub for job ${jobId}. Syncing Firestore.`);
-                                // Run is already there, just ensure Firestore stays active
-                                await runnerDocRef.set({
-                                    status: 'active',
-                                    lastActive: Date.now(),
-                                }, { merge: true });
-                                return NextResponse.json({ jobId }, { status: 201 });
+                        try {
+                            const runsRes = await fetch(runsUrl, {
+                                headers: {
+                                    Authorization: `Bearer ${githubToken}`,
+                                    Accept: 'application/vnd.github+json',
+                                },
+                            });
+
+                            if (runsRes.ok) {
+                                const runsData = await runsRes.json();
+                                if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
+                                    hasActiveRun = true;
+                                    console.log(`⏩ Workflow already active on GitHub for job ${jobId}. Syncing Firestore.`);
+                                    // Run is already there, just ensure Firestore stays active
+                                    await runnerDocRef.set({
+                                        status: 'active',
+                                        lastActive: Date.now(),
+                                    }, { merge: true });
+                                    return NextResponse.json({ jobId }, { status: 201 });
+                                }
                             }
+                        } catch (checkError) {
+                            console.warn(`⚠️  GitHub API check failed (non-blocking): ${checkError}. Will attempt dispatch anyway.`);
                         }
 
                         // --- TRIGGER WORKFLOW ---
-                        const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;
+                        if (!hasActiveRun) {
+                            const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;
 
-                        const dispatchRes = await fetch(dispatchUrl, {
-                            method: 'POST',
-                            headers: {
-                                Authorization: `Bearer ${githubToken}`,
-                                Accept: 'application/vnd.github+json',
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({ ref: 'main' }),
-                        });
+                            const dispatchRes = await fetch(dispatchUrl, {
+                                method: 'POST',
+                                headers: {
+                                    Authorization: `Bearer ${githubToken}`,
+                                    Accept: 'application/vnd.github+json',
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({ ref: 'main' }),
+                            });
 
-                        if (dispatchRes.ok) {
-                            console.log(`✅ Workflow triggered for job ${jobId} — runner was inactive/stale`);
-                        } else {
-                            const errorText = await dispatchRes.text();
-                            console.error(`⚠️ Failed to trigger workflow: ${dispatchRes.status}`, errorText);
-                            await runnerDocRef.update({ status: 'inactive' });
+                            if (dispatchRes.ok) {
+                                console.log(`✅ Workflow triggered for job ${jobId} — runner was inactive/stale`);
+                            } else {
+                                const errorText = await dispatchRes.text();
+                                console.error(`⚠️ Failed to trigger workflow: ${dispatchRes.status} ${errorText}`);
+                                await runnerDocRef.update({ status: 'inactive' });
+                            }
                         }
                     } catch (ghError) {
-                        console.error('⚠️ GitHub API check/trigger failed:', ghError);
+                        console.error('⚠️ GitHub API trigger failed:', ghError);
                         await runnerDocRef.update({ status: 'inactive' });
                     }
                 }
