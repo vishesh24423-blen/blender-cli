@@ -1,18 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import admin from 'firebase-admin';
 
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(
-            JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY!)
-        ),
-    });
-}
+// Firebase Admin is initialized lazily inside the POST handler
+let db: FirebaseFirestore.Firestore | null = null;
 
-const db = admin.firestore();
+function initializeFirebase() {
+    if (db) return db; // Already initialized
+    
+    const serviceAccountJson = process.env.FIREBASE_CONFIG || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    if (!serviceAccountJson) {
+        throw new Error('Missing Firebase config: set FIREBASE_CONFIG or FIREBASE_SERVICE_ACCOUNT_KEY environment variable');
+    }
+
+    try {
+        const serviceAccount = JSON.parse(serviceAccountJson);
+        if (!admin.apps.length) {
+            admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount),
+            });
+        }
+        db = admin.firestore();
+        return db;
+    } catch (parseError) {
+        throw new Error(`Failed to parse Firebase config: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+    }
+}
 
 export async function POST(request: NextRequest) {
     try {
+        // Initialize Firebase on demand
+        const database = initializeFirebase();
+        
         const body = await request.json();
         const { script, formats } = body;
 
@@ -31,24 +49,26 @@ export async function POST(request: NextRequest) {
         }
 
         // 1. Create job in Firestore (always queued)
-        const jobRef = await db.collection('jobs').add({
+        const jobRef = await database.collection('jobs').add({
             script,
             userId: 'anonymous',
             status: 'queued',
             formats,
             outputs: {},
             createdAt: Date.now(),
+            error: null,
         });
 
         const jobId = jobRef.id;
+        console.log(`📝 Job created: ${jobId} (${formats.join(", ")})`);
 
         // 2. Check and activate runner using Transaction
         try {
-            const runnerDocRef = db.collection('system').doc('runner');
+            const runnerDocRef = database.collection('system').doc('runner');
 
             let shouldTriggerWorkflow = false;
 
-            await db.runTransaction(async (transaction) => {
+            await database.runTransaction(async (transaction) => {
                 const runnerDoc = await transaction.get(runnerDocRef);
                 const runnerData = runnerDoc.data();
 
@@ -132,6 +152,7 @@ export async function POST(request: NextRequest) {
 
     } catch (err) {
         console.error('Submit job error:', err);
-        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+        const message = err instanceof Error ? err.message : 'Internal server error';
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }
