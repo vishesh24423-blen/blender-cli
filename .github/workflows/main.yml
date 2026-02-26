@@ -33,4 +33,4 @@ jobs:
         run: sudo snap install blender --classic
 
       - name: Run Worker
-        run: node persistent_worker.js
+        run: node scripts/persistent_worker.js
