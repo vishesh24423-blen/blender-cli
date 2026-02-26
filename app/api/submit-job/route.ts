@@ -75,32 +75,25 @@ export async function POST(request: NextRequest) {
 
                 runnerStatus = runnerData?.status ?? 'inactive';
                 const lastActive = runnerData?.lastActive ?? 0;
-                const lastTrigger = runnerData?.lastTrigger ?? 0;
                 const now = Date.now();
 
-                // Only trigger if:
-                // 1. Runner is NOT active, OR
-                // 2. Runner is stale (no heartbeat in 5 minutes), OR
-                // 3. Last trigger was more than 10 minutes ago (safety cooldown)
-                const isStale = now - lastActive > 5 * 60 * 1000; // 5 minutes
-                const cooldownExpired = now - lastTrigger > 10 * 60 * 1000; // 10 minutes
+                // Trigger workflow if runner is NOT currently active
+                // This includes: runner doesn't exist, runner is inactive, or runner is stale
+                const isStale = now - lastActive > 5 * 60 * 1000; // 5 minutes without heartbeat
 
-                if (runnerStatus !== 'active' && (isStale || cooldownExpired)) {
+                if (runnerStatus !== 'active' || isStale) {
                     shouldTriggerWorkflow = true;
-                    console.log(`🔴 Runner is ${runnerStatus || 'missing'}, setting to ACTIVE and scheduling trigger`);
+                    console.log(`🔴 Triggering runner: status=${runnerStatus}, stale=${isStale}`);
                     
                     // Atomically set runner to active with timestamps
                     transaction.set(runnerDocRef, {
                         status: 'active',
                         startedAt: now,
                         lastActive: now,
-                        lastTrigger: now, // IMPORTANT: Record when we triggered
                         triggeredJobId: jobId,
                     }, { merge: true });
                 } else {
-                    if (runnerStatus === 'active') {
-                        console.log(`🟢 Runner already ACTIVE, queueing job in existing workflow`);
-                    }
+                    console.log(`🟢 Runner already active, queueing job`);
                 }
             });
 
@@ -111,8 +104,12 @@ export async function POST(request: NextRequest) {
 
                 // Check if all GitHub env vars are present
                 if (!githubToken || !githubOwner || !githubRepo) {
-                    console.error(`⚠️ Cannot trigger workflow: Missing GitHub config. Token=${!!githubToken}, Owner=${!!githubOwner}, Repo=${!!githubRepo}`);
-                    console.error(`ℹ️  Set GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO in Vercel environment to enable auto-trigger`);
+                    console.error(`❌ CRITICAL: Cannot trigger workflow - Missing GitHub env vars!`);
+                    console.error(`   GITHUB_TOKEN: ${githubToken ? '✓ set' : '✗ MISSING'}`);
+                    console.error(`   GITHUB_OWNER: ${githubOwner ? '✓ set' : '✗ MISSING'}`);
+                    console.error(`   GITHUB_REPO: ${githubRepo ? '✓ set' : '✗ MISSING'}`);
+                    console.error(`   Job ${jobId} created but WILL NOT PROCESS until GitHub vars are set in Vercel`);
+                    console.error(`   → Vercel Settings → Environment Variables → Add GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO`);
                 } else {
                     try {
                         // --- PRIMARY CHECK: Verify NO active workflow already running ---
