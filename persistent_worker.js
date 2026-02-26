@@ -54,23 +54,24 @@ function buildExportScript(script, outFile, fmt) {
     .join('\n');
 
   const exportLines = {
-    // Blender 5.x: use_selection instead of export_selected
-    // Try both selection modes for robustness
+    // Blender 5.x glTF exporter - correct parameters
     glb: `
 print("DEBUG: Attempting GLB export...", file=sys.stderr)
 print(f"DEBUG: Objects selected: {len([o for o in bpy.context.selected_objects])}", file=sys.stderr)
 print(f"DEBUG: Objects in scene: {len(bpy.data.objects)}", file=sys.stderr)
 try:
-    print("DEBUG: Trying selective export...", file=sys.stderr)
-    bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB', export_selected_only=True, export_materials=True)
+    print("DEBUG: Trying export (selection mode)...", file=sys.stderr)
+    bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB', use_selection=True)
     print("EXPORT_SUCCESS: glb (selective)", file=sys.stderr)
 except Exception as e:
-    print(f"DEBUG: Selective export failed: {e}", file=sys.stderr)
-    # Fallback: export all objects if selection fails
+    print(f"DEBUG: Selection export failed: {e}", file=sys.stderr)
     print("DEBUG: Falling back to full scene export...", file=sys.stderr)
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB', export_selected_only=False, export_materials=True)
-    print("EXPORT_SUCCESS: glb (full)", file=sys.stderr)
+    try:
+        bpy.ops.export_scene.gltf(filepath='${outFile}', export_format='GLB', use_selection=False)
+        print("EXPORT_SUCCESS: glb (full)", file=sys.stderr)
+    except Exception as e2:
+        print(f"ERROR: Both export attempts failed: {e2}", file=sys.stderr)
+        raise
 
 if os.path.exists('${outFile}'):
     print(f"DEBUG: GLB file created, size: {os.path.getsize('${outFile}')} bytes", file=sys.stderr)
@@ -80,46 +81,66 @@ else:
     fbx: `
 print("DEBUG: Attempting FBX export...", file=sys.stderr)
 try:
+    print("DEBUG: Trying export (selection mode)...", file=sys.stderr)
     bpy.ops.export_scene.fbx(filepath='${outFile}', use_selection=True)
     print("EXPORT_SUCCESS: fbx (selective)", file=sys.stderr)
 except Exception as e:
-    print(f"DEBUG: Selective export failed: {e}", file=sys.stderr)
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.export_scene.fbx(filepath='${outFile}', use_selection=False)
-    print("EXPORT_SUCCESS: fbx (full)", file=sys.stderr)
+    print(f"DEBUG: Selection export failed: {e}", file=sys.stderr)
+    print("DEBUG: Falling back to full scene...", file=sys.stderr)
+    try:
+        bpy.ops.export_scene.fbx(filepath='${outFile}', use_selection=False)
+        print("EXPORT_SUCCESS: fbx (full)", file=sys.stderr)
+    except Exception as e2:
+        print(f"ERROR: Both FBX exports failed: {e2}", file=sys.stderr)
+        raise
 `,
     stl: `
 print("DEBUG: Attempting STL export...", file=sys.stderr)
 try:
+    print("DEBUG: Trying export (selection mode)...", file=sys.stderr)
     bpy.ops.export_mesh.stl(filepath='${outFile}', use_selection=True)
     print("EXPORT_SUCCESS: stl (selective)", file=sys.stderr)
 except Exception as e:
-    print(f"DEBUG: Selective export failed: {e}", file=sys.stderr)
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.export_mesh.stl(filepath='${outFile}', use_selection=False)
-    print("EXPORT_SUCCESS: stl (full)", file=sys.stderr)
+    print(f"DEBUG: Selection export failed: {e}", file=sys.stderr)
+    print("DEBUG: Falling back to full scene...", file=sys.stderr)
+    try:
+        bpy.ops.export_mesh.stl(filepath='${outFile}', use_selection=False)
+        print("EXPORT_SUCCESS: stl (full)", file=sys.stderr)
+    except Exception as e2:
+        print(f"ERROR: Both STL exports failed: {e2}", file=sys.stderr)
+        raise
 `,
     obj: `
 print("DEBUG: Attempting OBJ export...", file=sys.stderr)
 try:
-    bpy.ops.wm.obj_export(filepath='${outFile}', export_selected_objects=True, export_materials=True)
+    print("DEBUG: Trying export (selection mode)...", file=sys.stderr)
+    bpy.ops.export_scene.obj(filepath='${outFile}', use_selection=True)
     print("EXPORT_SUCCESS: obj (selective)", file=sys.stderr)
 except Exception as e:
-    print(f"DEBUG: Selective export failed: {e}", file=sys.stderr)
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.wm.obj_export(filepath='${outFile}', export_selected_objects=False, export_materials=True)
-    print("EXPORT_SUCCESS: obj (full)", file=sys.stderr)
+    print(f"DEBUG: Selection export failed: {e}", file=sys.stderr)
+    print("DEBUG: Falling back to full scene...", file=sys.stderr)
+    try:
+        bpy.ops.export_scene.obj(filepath='${outFile}', use_selection=False)
+        print("EXPORT_SUCCESS: obj (full)", file=sys.stderr)
+    except Exception as e2:
+        print(f"ERROR: Both OBJ exports failed: {e2}", file=sys.stderr)
+        raise
 `,
     usd: `
 print("DEBUG: Attempting USD export...", file=sys.stderr)
 try:
-    bpy.ops.wm.usd_export(filepath='${outFile}', selected_objects_only=True)
+    print("DEBUG: Trying export (selection mode)...", file=sys.stderr)
+    bpy.ops.wm.usd_export(filepath='${outFile}', use_selection=True)
     print("EXPORT_SUCCESS: usd (selective)", file=sys.stderr)
 except Exception as e:
-    print(f"DEBUG: Selective export failed: {e}", file=sys.stderr)
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.wm.usd_export(filepath='${outFile}', selected_objects_only=False)
-    print("EXPORT_SUCCESS: usd (full)", file=sys.stderr)
+    print(f"DEBUG: Selection export failed: {e}", file=sys.stderr)
+    print("DEBUG: Falling back to full scene...", file=sys.stderr)
+    try:
+        bpy.ops.wm.usd_export(filepath='${outFile}', use_selection=False)
+        print("EXPORT_SUCCESS: usd (full)", file=sys.stderr)
+    except Exception as e2:
+        print(f"ERROR: Both USD exports failed: {e2}", file=sys.stderr)
+        raise
 `,
   };
 
