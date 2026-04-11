@@ -37,8 +37,8 @@ import os
 bpy.context.scene.render.film_transparent = True
 bpy.context.scene.render.image_settings.color_mode = 'RGBA'
 
-# 2. Render engine — EEVEE Next (fast, GPU-quality)
-bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
+# 2. Render engine — EEVEE (Blender 5.1+)
+bpy.context.scene.render.engine = 'BLENDER_EEVEE'
 eevee = bpy.context.scene.eevee
 eevee.use_gtao = True
 eevee.gtao_distance = 0.5
@@ -47,6 +47,7 @@ eevee.bloom_threshold = 0.8
 eevee.bloom_intensity = 0.3
 eevee.bloom_radius = 5.0
 eevee.use_ssr = True
+eevee.use_ssr_halfres = False
 eevee.use_shadow_high_bitdepth = True
 
 # 3. Resolution
@@ -229,10 +230,10 @@ function buildScript(userScript, outFile, fmt, workDir, quality = 'standard') {
     preamble = SPLINE_PREAMBLE;
     postPass = SPLINE_MATERIAL_UPGRADE;
   } else if (effectiveQuality === 'cinematic') {
-    // Cinematic: standard + volumetric lights + 4K + more bloom
+    // Cinematic: standard + stronger bloom + 4K render
     preamble = SPLINE_PREAMBLE.replace(
-      "eevee.bloom_radius = 5.0",
-      "eevee.bloom_radius = 5.0\neevee.bloom_intensity = 0.5\neevee.use_volumetric_lights = True"
+      "eevee.bloom_intensity = 0.3",
+      "eevee.bloom_intensity = 0.6"
     ).replace(
       "bpy.context.scene.render.resolution_x = 1920\nbpy.context.scene.render.resolution_y = 1080",
       "bpy.context.scene.render.resolution_x = 3840\nbpy.context.scene.render.resolution_y = 2160"

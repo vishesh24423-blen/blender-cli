@@ -313,7 +313,7 @@ When submitting a job, you can choose from three quality levels:
 |---|---|
 | **Draft** ⚡ | Fast, basic lighting — skips all automatic upgrades. Use for quick iteration. |
 | **Standard** ✨ | HDRI + PBR clearcoat + bloom + shadow catcher + auto-framed camera. **This is the default.** |
-| **Cinematic** 🎬 | Everything in Standard + volumetric lights + 4K resolution + stronger bloom. |
+| **Cinematic** 🎬 | Everything in Standard + stronger bloom + 4K resolution. |
 
 ### Override behaviour
 

@@ -16,7 +16,7 @@ const FORMATS: { id: OutputFormat; label: string }[] = [
 const QUALITY_PRESETS: { id: QualityPreset; label: string; description: string }[] = [
     { id: 'draft', label: 'Draft', description: 'Fast, basic lighting — skips upgrades' },
     { id: 'standard', label: 'Standard', description: 'HDRI + PBR clearcoat + bloom (default)' },
-    { id: 'cinematic', label: 'Cinematic', description: 'Standard + volumetric lights + 4K' },
+    { id: 'cinematic', label: 'Cinematic', description: 'Standard + stronger bloom + 4K render' },
 ];
 
 const SAMPLE_SCRIPT = `import bpy
