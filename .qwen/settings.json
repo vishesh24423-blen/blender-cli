@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npx *)",
-      "Bash(findstr *)"
+      "Bash(findstr *)",
+      "Bash(dir *)",
+      "Bash(type *)"
     ]
   },
   "$version": 3

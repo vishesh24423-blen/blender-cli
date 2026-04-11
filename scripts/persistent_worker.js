@@ -37,18 +37,22 @@ import os
 bpy.context.scene.render.film_transparent = True
 bpy.context.scene.render.image_settings.color_mode = 'RGBA'
 
-# 2. Render engine — EEVEE (Blender 5.1+)
-bpy.context.scene.render.engine = 'BLENDER_EEVEE'
-eevee = bpy.context.scene.eevee
-eevee.use_gtao = True
-eevee.gtao_distance = 0.5
-eevee.use_bloom = True
-eevee.bloom_threshold = 0.8
-eevee.bloom_intensity = 0.3
-eevee.bloom_radius = 5.0
-eevee.use_ssr = True
-eevee.use_ssr_halfres = False
-eevee.use_shadow_high_bitdepth = True
+# 2. Render engine — use Blender's default (EEVEE on 5.1+)
+# DO NOT set bpy.context.scene.render.engine — let Blender choose
+eevee = getattr(bpy.context.scene, 'eevee', None)
+if eevee is not None:
+    eevee.use_gtao = True
+    eevee.gtao_distance = 0.5
+    eevee.use_bloom = True
+    eevee.bloom_threshold = 0.8
+    eevee.bloom_intensity = 0.3
+    eevee.bloom_radius = 5.0
+    if hasattr(eevee, 'use_ssr'):
+        eevee.use_ssr = True
+    if hasattr(eevee, 'use_ssr_halfres'):
+        eevee.use_ssr_halfres = False
+    if hasattr(eevee, 'use_shadow_high_bitdepth'):
+        eevee.use_shadow_high_bitdepth = True
 
 # 3. Resolution
 bpy.context.scene.render.resolution_x = 1920
