@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# HDRI assets (downloaded in CI, not committed)
+assets/*.hdr
+scripts/assets/*.hdr

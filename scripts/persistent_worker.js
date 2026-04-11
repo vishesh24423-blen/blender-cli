@@ -23,14 +23,224 @@ const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 100
 const startTime = Date.now();
 
 const EXPORT_CMD = {
-  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB')`,
+  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB', export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=6, export_materials='EXPORT', export_colors=True, export_apply=True, export_yup=True, export_normals=True, export_texcoords=True, export_cameras=False, export_lights=False)`,
   fbx: (f) => `bpy.ops.export_scene.fbx(filepath='${f}')`,
   stl: (f) => `bpy.ops.export_mesh.stl(filepath='${f}')`,
   usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}')`,
 };
 
-function buildScript(userScript, outFile, fmt) {
+const SPLINE_PREAMBLE = `import bpy
+import os
+
+# ── SPLINE QUALITY SETUP ──────────────────────────────────────────
+# 1. Transparent background
+bpy.context.scene.render.film_transparent = True
+bpy.context.scene.render.image_settings.color_mode = 'RGBA'
+
+# 2. Render engine — EEVEE Next (fast, GPU-quality)
+bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
+eevee = bpy.context.scene.eevee
+eevee.use_gtao = True
+eevee.gtao_distance = 0.5
+eevee.use_bloom = True
+eevee.bloom_threshold = 0.8
+eevee.bloom_intensity = 0.3
+eevee.bloom_radius = 5.0
+eevee.use_ssr = True
+eevee.use_shadow_high_bitdepth = True
+
+# 3. Resolution
+bpy.context.scene.render.resolution_x = 1920
+bpy.context.scene.render.resolution_y = 1080
+bpy.context.scene.render.resolution_percentage = 100
+
+# 4. HDRI world lighting (IBL — the #1 visual quality lever)
+world = bpy.data.worlds.new("SplineWorld")
+bpy.context.scene.world = world
+world.use_nodes = True
+w_nodes = world.node_tree.nodes
+w_links = world.node_tree.links
+w_nodes.clear()
+
+bg = w_nodes.new("ShaderNodeBackground")
+env_tex = w_nodes.new("ShaderNodeTexEnvironment")
+tex_coord = w_nodes.new("ShaderNodeTexCoord")
+mapping = w_nodes.new("ShaderNodeMapping")
+output = w_nodes.new("ShaderNodeOutputWorld")
+
+# Try to load bundled HDRI (downloaded in CI at scripts/assets/studio_small_03_1k.hdr)
+hdr_path = os.path.join(os.path.dirname(__file__), 'assets', 'studio_small_03_1k.hdr')
+if os.path.exists(hdr_path):
+    env_tex.image = bpy.data.images.load(hdr_path)
+    bg.inputs['Strength'].default_value = 1.8
+else:
+    # Fallback: pure white world background so renders don't fail
+    env_tex.image = None
+    bg.inputs['Strength'].default_value = 0.5
+
+w_links.new(tex_coord.outputs['Generated'], mapping.inputs['Vector'])
+w_links.new(mapping.outputs['Vector'], env_tex.inputs['Vector'])
+w_links.new(env_tex.outputs['Color'], bg.inputs['Color'])
+w_links.new(bg.outputs['Background'], output.inputs['Surface'])
+
+# 5. Camera — positioned for hero shot
+cam_data = bpy.data.cameras.new("SplineCam")
+cam_data.lens = 85
+cam_data.dof.use_dof = True
+cam_data.dof.aperture_fstop = 2.8
+cam_obj = bpy.data.objects.new("SplineCam", cam_data)
+bpy.context.scene.collection.objects.link(cam_obj)
+bpy.context.scene.camera = cam_obj
+cam_obj.location = (0, -6, 2)
+cam_obj.rotation_euler = (1.309, 0, 0)
+
+# 6. Ground plane — shadow catcher only (invisible, catches object shadow)
+bpy.ops.mesh.primitive_plane_add(size=30, location=(0, 0, -1.05))
+shadow_plane = bpy.context.active_object
+shadow_plane.name = "_ShadowCatcher"
+shadow_plane.is_shadow_catcher = True
+shadow_plane.visible_camera = True
+shadow_plane.visible_diffuse = False
+
+print("✅ Spline quality setup complete")
+# ── END SETUP ─────────────────────────────────────────────────────
+`;
+
+const SPLINE_MATERIAL_UPGRADE = `
+# ── SPLINE MATERIAL UPGRADE PASS ─────────────────────────────────
+import bpy
+import mathutils
+
+SPLINE_PALETTE = [
+    (0.12, 0.08, 0.95),
+    (0.55, 0.10, 0.95),
+    (0.05, 0.75, 0.85),
+    (0.95, 0.30, 0.55),
+    (0.10, 0.90, 0.55),
+]
+
+mesh_objects = [o for o in bpy.data.objects if o.type == 'MESH' and not o.name.startswith('_')]
+
+for idx, obj in enumerate(mesh_objects):
+    if obj.data.materials:
+        mat = obj.data.materials[0]
+    else:
+        mat = bpy.data.materials.new(f"SplineMat_{idx}")
+        mat.use_nodes = True
+        obj.data.materials.append(mat)
+
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    
+    bsdf = nodes.get("Principled BSDF")
+    if not bsdf:
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+
+    current_color = bsdf.inputs['Base Color'].default_value
+    is_default_grey = all(abs(current_color[i] - 0.8) < 0.05 for i in range(3))
+    if is_default_grey:
+        r, g, b = SPLINE_PALETTE[idx % len(SPLINE_PALETTE)]
+        bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
+
+    bsdf.inputs['Roughness'].default_value = 0.15
+    bsdf.inputs['Specular IOR Level'].default_value = 0.8
+    if 'Coat Weight' in bsdf.inputs:
+        bsdf.inputs['Coat Weight'].default_value = 0.6
+        bsdf.inputs['Coat Roughness'].default_value = 0.05
+    if 'Sheen Weight' in bsdf.inputs:
+        bsdf.inputs['Sheen Weight'].default_value = 0.05
+
+    if idx == 0:
+        cam = bpy.context.scene.camera
+        if cam:
+            world_center = obj.matrix_world @ mathutils.Vector(obj.location)
+            dist = (cam.location - world_center).length
+            cam.data.dof.focus_distance = max(dist, 0.1)
+
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
+    obj.data.update()
+
+# ── AUTO-FRAME CAMERA ────────────────────────────────────────────
+mesh_obs = [o for o in bpy.data.objects if o.type == 'MESH' and not o.name.startswith('_')]
+if mesh_obs:
+    min_co = mathutils.Vector((float('inf'),)*3)
+    max_co = mathutils.Vector((float('-inf'),)*3)
+    for ob in mesh_obs:
+        for corner in ob.bound_box:
+            world = ob.matrix_world @ mathutils.Vector(corner)
+            min_co = mathutils.Vector(map(min, zip(min_co, world)))
+            max_co = mathutils.Vector(map(max, zip(max_co, world)))
+
+    center = (min_co + max_co) / 2
+    diagonal = (max_co - min_co).length
+    distance = diagonal * 2.2
+
+    cam = bpy.context.scene.camera
+    if cam:
+        cam.location = (center.x, center.y - distance, center.z + distance * 0.35)
+        direction = center - cam.location
+        cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+        cam.data.dof.focus_distance = distance
+
+# ── COMPOSITOR: bloom + chromatic aberration + vignette ──────────
+scene = bpy.context.scene
+scene.use_nodes = True
+tree = scene.node_tree
+tree.nodes.clear()
+
+rl = tree.nodes.new("CompositorNodeRLayers")
+rl.location = (-400, 0)
+
+glare = tree.nodes.new("CompositorNodeGlare")
+glare.glare_type = 'FOG_GLOW'
+glare.threshold = 0.85
+glare.size = 7
+glare.location = (-100, 100)
+
+lens = tree.nodes.new("CompositorNodeLensdist")
+lens.inputs['Distortion'].default_value = 0.0
+lens.inputs['Dispersion'].default_value = 0.025
+lens.location = (150, 100)
+
+comp = tree.nodes.new("CompositorNodeComposite")
+comp.location = (400, 0)
+
+tree.links.new(rl.outputs['Image'], glare.inputs['Image'])
+tree.links.new(glare.outputs['Image'], lens.inputs['Image'])
+tree.links.new(lens.outputs['Image'], comp.inputs['Image'])
+tree.links.new(rl.outputs['Alpha'], comp.inputs['Alpha'])
+
+print("✅ Material upgrade + compositor complete")
+# ── END POST PASS ─────────────────────────────────────────────────
+`;
+
+function buildScript(userScript, outFile, fmt, quality = 'standard') {
   const indented = String(userScript || '').split('\n').map(l => `    ${l}`).join('\n');
+
+  // Check for draft override in script comments
+  const hasDraftOverride = userScript.includes('# blenderlab:quality=draft');
+  const effectiveQuality = hasDraftOverride ? 'draft' : quality;
+
+  let preamble = '';
+  let postPass = '';
+
+  if (effectiveQuality === 'standard') {
+    preamble = SPLINE_PREAMBLE;
+    postPass = SPLINE_MATERIAL_UPGRADE;
+  } else if (effectiveQuality === 'cinematic') {
+    // Cinematic: standard + volumetric lights + 4K + more bloom
+    preamble = SPLINE_PREAMBLE.replace(
+      "eevee.bloom_radius = 5.0",
+      "eevee.bloom_radius = 5.0\neevee.bloom_intensity = 0.5\neevee.use_volumetric_lights = True"
+    ).replace(
+      "bpy.context.scene.render.resolution_x = 1920\nbpy.context.scene.render.resolution_y = 1080",
+      "bpy.context.scene.render.resolution_x = 3840\nbpy.context.scene.render.resolution_y = 2160"
+    );
+    postPass = SPLINE_MATERIAL_UPGRADE;
+  }
+  // 'draft' gets no preamble or post-pass
+
   return `
 import bpy, sys, os, traceback
 
@@ -38,10 +248,26 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False, confirm=False)
 
 try:
+${preamble.split('\n').map(l => `    ${l}`).join('\n')}
 ${indented}
+${postPass.split('\n').map(l => `    ${l}`).join('\n')}
 except Exception as e:
     traceback.print_exc(file=sys.stderr)
     sys.exit(1)
+
+# ── PREVIEW THUMBNAIL ─────────────────────────────────────────────
+try:
+    if effectiveQuality != 'draft':
+        bpy.context.scene.render.resolution_x = 1200
+        bpy.context.scene.render.resolution_y = 800
+        bpy.context.scene.render.filepath = '${workDir}/preview.png'
+        bpy.context.scene.render.image_settings.file_format = 'PNG'
+        bpy.context.scene.render.image_settings.color_mode = 'RGBA'
+        bpy.ops.render.render(write_still=True)
+        print("✅ Preview thumbnail rendered")
+except Exception as e:
+    print(f"Preview render warning: {e}", file=sys.stderr)
+# ── END PREVIEW ───────────────────────────────────────────────────
 
 os.makedirs(os.path.dirname('${outFile}'), exist_ok=True)
 
@@ -74,6 +300,7 @@ async function processJob(job) {
 
   const outputs = {};
   let success = 0;
+  const quality = job.quality || 'standard';
 
   try {
     for (const fmt of job.formats) {
@@ -81,7 +308,7 @@ async function processJob(job) {
 
       const outFile = path.join(workDir, `output.${fmt}`);
       const scriptPath = path.join(workDir, `export_${fmt}.py`);
-      fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt));
+      fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt, quality));
 
       try {
         execSync(`blender --background --python ${scriptPath} 2>&1`, {
@@ -104,6 +331,19 @@ async function processJob(job) {
       } else {
         console.error(`❌ ${fmt} export failed`);
       }
+    }
+
+    // Upload preview thumbnail if it exists
+    const previewPath = path.join(workDir, 'preview.png');
+    if (fs.existsSync(previewPath) && fs.statSync(previewPath).size > 100) {
+      const previewKey = `jobs/${job.id}/preview.png`;
+      await r2.send(new PutObjectCommand({
+        Bucket: BUCKET, Key: previewKey,
+        Body: fs.readFileSync(previewPath),
+        ContentType: 'image/png',
+      }));
+      outputs.preview = { url: `${R2_PUBLIC_URL}/${previewKey}`, expiresAt: Date.now() + 86400000 };
+      console.log(`🖼️ Preview → ${outputs.preview.url}`);
     }
 
     await ref.update({
@@ -140,6 +380,7 @@ async function main() {
   }, { merge: true });
 
   let jobCount = 0;
+  let emptyQueueCount = 0;
 
   while (Date.now() - startTime < WINDOW_MS) {
     // Send heartbeat every 30 seconds
@@ -147,11 +388,18 @@ async function main() {
 
     const job = await getNextJob();
     if (job) {
+      emptyQueueCount = 0; // reset on job found
       jobCount++;
       await processJob(job);
     } else {
-      console.log('⏳ Waiting 30s for next job...'); 
-      await new Promise(r => setTimeout(r, 30000));
+      emptyQueueCount++;
+      // First empty check: poll immediately after 2s
+      // Subsequent empty checks: back off gradually up to 30s
+      const delay = emptyQueueCount === 1
+        ? 2000
+        : Math.min(30000, 2000 * emptyQueueCount);
+      console.log(`⏳ Queue empty, polling again in ${delay / 1000}s...`);
+      await new Promise(r => setTimeout(r, delay));
     }
   }
 

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check } from 'lucide-react';
-import type { OutputFormat } from '@/lib/types';
+import { Check, ChevronDown, Sparkles } from 'lucide-react';
+import type { OutputFormat, QualityPreset } from '@/lib/types';
 
 const FORMATS: { id: OutputFormat; label: string }[] = [
     { id: 'glb', label: 'GLB' },
@@ -11,6 +11,12 @@ const FORMATS: { id: OutputFormat; label: string }[] = [
     { id: 'stl', label: 'STL' },
     { id: 'obj', label: 'OBJ' },
     { id: 'usd', label: 'USD' },
+];
+
+const QUALITY_PRESETS: { id: QualityPreset; label: string; description: string }[] = [
+    { id: 'draft', label: 'Draft', description: 'Fast, basic lighting — skips upgrades' },
+    { id: 'standard', label: 'Standard', description: 'HDRI + PBR clearcoat + bloom (default)' },
+    { id: 'cinematic', label: 'Cinematic', description: 'Standard + volumetric lights + 4K' },
 ];
 
 const SAMPLE_SCRIPT = `import bpy
@@ -40,8 +46,23 @@ export default function ScriptSubmitForm() {
     const router = useRouter();
     const [script, setScript] = useState('');
     const [formats, setFormats] = useState<OutputFormat[]>(['glb']);
+    const [quality, setQuality] = useState<QualityPreset>('standard');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [qualityOpen, setQualityOpen] = useState(false);
+
+    useEffect(() => {
+        try {
+            const data = sessionStorage.getItem('blenderlab_regenerate');
+            if (data) {
+                const { script: savedScript, formats: savedFormats, quality: savedQuality } = JSON.parse(data);
+                setScript(savedScript);
+                setFormats(savedFormats);
+                if (savedQuality) setQuality(savedQuality);
+                sessionStorage.removeItem('blenderlab_regenerate');
+            }
+        } catch { /* ignore */ }
+    }, []);
 
     const toggleFormat = (format: OutputFormat) => {
         setFormats((prev) =>
@@ -63,7 +84,7 @@ export default function ScriptSubmitForm() {
             const res = await fetch('/api/submit-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ script: scriptContent, formats }),
+                body: JSON.stringify({ script: scriptContent, formats, quality }),
             });
 
             const data = await res.json();
@@ -76,28 +97,82 @@ export default function ScriptSubmitForm() {
         }
     };
 
+    const selectedQuality = QUALITY_PRESETS.find(q => q.id === quality);
+
     return (
         <div className="submit-form">
-            {/* Instructions */}
-            <div style={{ 
-                padding: '16px 20px',
-                background: 'var(--accent-blue-dim)',
-                border: '1px solid rgba(59, 130, 246, 0.2)',
-                borderRadius: 'var(--radius-sm)',
-                marginBottom: '20px',
-                fontSize: '13px',
-                lineHeight: '1.6'
-            }}>
-                <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--accent-blue)' }}>
-                    💡 Quick Tips:
-                </div>
-                <ul style={{ margin: 0, paddingLeft: '16px' }}>
-                    <li>✅ Create mesh objects with <code style={{ background: 'rgba(0,0,0,0.1)', padding: '2px 4px' }}>bpy.ops.mesh.*</code></li>
-                    <li>✅ Add materials & modifiers for polish</li>
-                    <li>✅ <strong>Select all mesh objects at the end</strong> for BlenderLab to export them</li>
-                    <li>❌ Skip scene clearing, export code, render settings</li>
-                    <li>🔗 See <a href="/SCRIPT_WRITING_GUIDE.md" style={{ color: 'var(--accent-blue)', textDecoration: 'underline' }}>Script Guide</a> for details</li>
-                </ul>
+            {/* Quality Preset Selector */}
+            <div style={{ position: 'relative' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                    Quality Preset
+                </label>
+                <button
+                    type="button"
+                    onClick={() => setQualityOpen(!qualityOpen)}
+                    style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--surface-container)',
+                        border: '1px solid var(--ghost-border)',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                    }}
+                >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: 'var(--primary)' }}>✦</span>
+                        <span>{selectedQuality?.label}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>— {selectedQuality?.description}</span>
+                    </span>
+                    <ChevronDown size={14} style={{ transition: 'transform 0.15s', transform: qualityOpen ? 'rotate(180deg)' : 'none', color: 'var(--text-muted)' }} />
+                </button>
+
+                {qualityOpen && (
+                    <div style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 4px)',
+                        left: 0,
+                        right: 0,
+                        padding: '6px',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--surface-high)',
+                        border: '1px solid var(--ghost-border)',
+                        backdropFilter: 'blur(12px)',
+                        zIndex: 20,
+                    }}>
+                        {QUALITY_PRESETS.map((q) => (
+                            <button
+                                key={q.id}
+                                type="button"
+                                onClick={() => { setQuality(q.id); setQualityOpen(false); }}
+                                style={{
+                                    width: '100%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '10px',
+                                    padding: '8px 10px',
+                                    borderRadius: 'var(--radius-sm)',
+                                    background: quality === q.id ? 'var(--primary-dim)' : 'transparent',
+                                    border: 'none',
+                                    color: 'var(--text-primary)',
+                                    cursor: 'pointer',
+                                    fontSize: '13px',
+                                    textAlign: 'left',
+                                }}
+                            >
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontWeight: 500 }}>{q.label}</div>
+                                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{q.description}</div>
+                                </div>
+                                {quality === q.id && <Check size={14} color="var(--primary)" />}
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Code Editor */}
@@ -135,7 +210,7 @@ export default function ScriptSubmitForm() {
                                 className={`format-chip ${selected ? 'format-chip--selected' : ''}`}
                                 onClick={() => toggleFormat(f.id)}
                             >
-                                {selected && <Check size={14} />}
+                                {selected && <Check size={13} />}
                                 .{f.label}
                             </button>
                         );
@@ -144,11 +219,7 @@ export default function ScriptSubmitForm() {
             </div>
 
             {/* Error */}
-            {error && (
-                <div className="submit-error">
-                    {error}
-                </div>
-            )}
+            {error && <div className="submit-error">{error}</div>}
 
             {/* Submit */}
             <button
@@ -164,11 +235,7 @@ export default function ScriptSubmitForm() {
                     </>
                 ) : (
                     <>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
-                            <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
-                            <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
-                        </svg>
+                        <Sparkles size={16} />
                         Generate 3D Assets
                     </>
                 )}

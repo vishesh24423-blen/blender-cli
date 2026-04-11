@@ -9,9 +9,23 @@ import { useRunner } from '@/hooks/useRunner';
 import { useCountdown } from '@/hooks/useCountdown';
 import QueuePosition from '@/components/QueuePosition';
 import FileDownloadCard from '@/components/FileDownloadCard';
+import ThreeViewer from '@/components/ThreeViewer';
 import Link from 'next/link';
-import { ArrowLeft, RefreshCw, AlertTriangle } from 'lucide-react';
-import type { OutputFormat } from '@/lib/types';
+import { ArrowLeft, RefreshCw, AlertTriangle, Sparkles } from 'lucide-react';
+import type { OutputFormat, QualityPreset } from '@/lib/types';
+
+const QUALITY_LABELS: Record<QualityPreset, string> = {
+    draft: 'Draft',
+    standard: 'Standard',
+    cinematic: 'Cinematic',
+};
+
+const STATUS_CONFIG: Record<string, { label: string; dotClass: string; badgeClass: string }> = {
+    queued: { label: 'QUEUED', dotClass: 'status-dot--queued', badgeClass: 'status-badge--queued' },
+    processing: { label: 'PROCESSING', dotClass: 'status-dot--processing', badgeClass: 'status-badge--processing' },
+    done: { label: 'COMPLETED', dotClass: 'status-dot--done', badgeClass: 'status-badge--done' },
+    failed: { label: 'FAILED', dotClass: 'status-dot--failed', badgeClass: 'status-badge--failed' },
+};
 
 export default function JobPage({ params }: { params: Promise<{ jobId: string }> }) {
     const { jobId } = use(params);
@@ -22,14 +36,6 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
     const [queuePosition, setQueuePosition] = useState<number | null>(null);
     const isQueued = job?.status === 'queued';
 
-    // ✅ FIXED: moved out of render body into useEffect
-    useEffect(() => {
-        if (!isQueued) {
-            setQueuePosition(null);
-        }
-    }, [isQueued]);
-
-    // Calculate queue position
     useEffect(() => {
         if (!isQueued) return;
 
@@ -53,9 +59,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         return () => clearInterval(interval);
     }, [isQueued, jobId]);
 
-    const handleRetry = () => {
-        router.push('/');
-    };
+    const handleRetry = () => router.push('/');
 
     if (loading) {
         return (
@@ -73,10 +77,10 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                 </Link>
                 <div className="status-card">
                     <div className="status-card-center">
-                        <AlertTriangle size={40} color="var(--accent-red)" />
+                        <AlertTriangle size={36} color="var(--accent-red)" />
                         <p className="processing-text">{error || 'Job not found'}</p>
                         <Link href="/" className="retry-button">
-                            <ArrowLeft size={16} /> Go back
+                            <ArrowLeft size={14} /> Go back
                         </Link>
                     </div>
                 </div>
@@ -84,41 +88,57 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         );
     }
 
+    const status = STATUS_CONFIG[job.status] || STATUS_CONFIG.failed;
+
     return (
         <div className="job-page">
             <Link href="/" className="back-link">
                 <ArrowLeft size={16} /> Back to home
             </Link>
 
+            {/* Header */}
             <div className="job-page-header">
-                <p className="job-id">Job ID: {jobId}</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <p className="job-id">{jobId}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                     <h1 className="job-title">Job Status</h1>
-                    <span className={`status-badge status-badge--${job.status}`}>
-                        {job.status.toUpperCase()}
+                    <span className={`status-badge ${status.badgeClass}`}>
+                        <span className={`status-dot ${status.dotClass}`} />
+                        {status.label}
                     </span>
+                    {job.quality && (
+                        <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '4px 12px',
+                            borderRadius: 'var(--radius-full)',
+                            background: 'var(--primary-dim)',
+                            fontSize: '12px',
+                            color: 'var(--primary)',
+                            fontWeight: 500,
+                        }}>
+                            ✦ {QUALITY_LABELS[job.quality]}
+                        </span>
+                    )}
                 </div>
             </div>
 
             {/* ─── Queued ─── */}
             {job.status === 'queued' && (
                 <div className="status-card glow-purple">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {queuePosition !== null && <QueuePosition position={queuePosition} />}
 
                         {runner && runner.status === 'inactive' && (
                             <div style={{
-                                padding: '16px 20px',
-                                borderRadius: 'var(--radius-sm)',
-                                background: 'var(--accent-yellow-dim)',
-                                border: '1px solid rgba(245, 158, 11, 0.2)',
+                                padding: '14px 18px',
+                                borderRadius: 'var(--radius)',
+                                background: 'var(--accent-amber-dim)',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                gap: '4px'
+                                gap: '4px',
                             }}>
-                                <span style={{ fontSize: '14px', fontWeight: 500 }}>
-                                ⏳ Runner is idle
-                                </span>
+                                <span style={{ fontSize: '14px', fontWeight: 500 }}>⏳ Runner is idle</span>
                                 <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
                                     Next activation in: <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
                                         {nextRunCountdown.formatted}
@@ -129,13 +149,12 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
 
                         {runner && runner.status === 'active' && (
                             <div style={{
-                                padding: '16px 20px',
-                                borderRadius: 'var(--radius-sm)',
+                                padding: '14px 18px',
+                                borderRadius: 'var(--radius)',
                                 background: 'var(--accent-green-dim)',
-                                border: '1px solid rgba(16, 185, 129, 0.2)',
                             }}>
                                 <span style={{ fontSize: '14px', color: 'var(--accent-green)' }}>
-                                    🟢 Runner is active — your job will be picked up shortly
+                                    Runner is active — your job will be picked up shortly
                                 </span>
                             </div>
                         )}
@@ -159,21 +178,78 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
             {/* ─── Done ─── */}
             {job.status === 'done' && (
                 <div className="downloads-section">
-                    <h2 className="downloads-title">Your 3D Models are Ready</h2>
-                    <div className="downloads-expiry-warning">
-                        <AlertTriangle size={14} />
-                        Files expire in 24 hours
+                    {/* 3D Viewer — hero position */}
+                    {job.outputs?.glb && (
+                        <div style={{ marginBottom: '28px' }}>
+                            <ThreeViewer
+                                glbUrl={job.outputs.glb.url}
+                                posterUrl={job.outputs.preview?.url}
+                                className="h-[500px]"
+                            />
+                        </div>
+                    )}
+
+                    {/* Download section */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                        <h2 className="downloads-title">Download Files</h2>
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '5px 12px',
+                            borderRadius: 'var(--radius-full)',
+                            background: 'var(--accent-amber-dim)',
+                            fontSize: '12px',
+                            color: 'var(--accent-amber)',
+                        }}>
+                            <AlertTriangle size={11} />
+                            Expires in 24 hours
+                        </div>
                     </div>
+
                     <div className="downloads-grid">
                         {job.outputs &&
-                            Object.entries(job.outputs).map(([format, file]) => (
+                            (Object.entries(job.outputs) as [string, { url: string; size?: number }][]).filter(
+                                ([format]) => format !== 'preview'
+                            ).map(([format, file]) => (
                                 <FileDownloadCard
                                     key={format}
                                     format={format as OutputFormat}
                                     url={file.url}
-                                    size={file.size}
+                                    size={file.size || 0}
                                 />
                             ))}
+                    </div>
+
+                    {/* Regenerate */}
+                    <div style={{ marginTop: '28px', textAlign: 'center' }}>
+                        <button
+                            onClick={() => {
+                                sessionStorage.setItem('blenderlab_regenerate', JSON.stringify({
+                                    script: job.script,
+                                    formats: job.formats,
+                                    quality: job.quality || 'standard',
+                                }));
+                                router.push('/');
+                            }}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '10px 24px',
+                                borderRadius: 'var(--radius-full)',
+                                background: 'transparent',
+                                border: '1px solid var(--ghost-border)',
+                                color: 'var(--primary)',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                fontWeight: 500,
+                                transition: 'all 0.2s',
+                            }}
+                        >
+                            <Sparkles size={15} />
+                            Regenerate with Same Settings
+                        </button>
                     </div>
                 </div>
             )}
@@ -182,13 +258,13 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
             {job.status === 'failed' && (
                 <div className="status-card">
                     <div className="error-section">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                            <AlertTriangle size={24} color="var(--accent-red)" />
-                            <span style={{ fontSize: '16px', fontWeight: 600 }}>Job Failed</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+                            <AlertTriangle size={20} color="var(--accent-red)" />
+                            <span style={{ fontSize: '16px', fontWeight: 600, fontFamily: 'var(--font-display)' }}>Job Failed</span>
                         </div>
                         {job.error && <div className="error-message">{job.error}</div>}
                         <button className="retry-button" onClick={handleRetry}>
-                            <RefreshCw size={16} />
+                            <RefreshCw size={14} />
                             Try Again
                         </button>
                     </div>

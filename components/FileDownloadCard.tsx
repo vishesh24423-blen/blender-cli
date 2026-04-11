@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { useCountdown } from '@/hooks/useCountdown';
 import { formatFileSize } from '@/lib/utils';
 import type { OutputFormat } from '@/lib/types';
-import { Download, Clock, FileBox } from 'lucide-react';
+import { Download, Clock, Package } from 'lucide-react';
 
 interface FileDownloadCardProps {
     format: OutputFormat;
@@ -13,7 +13,7 @@ interface FileDownloadCardProps {
 }
 
 const FORMAT_COLORS: Record<string, string> = {
-    glb: '#10b981',
+    glb: '#22c55e',
     fbx: '#8b5cf6',
     stl: '#f59e0b',
     obj: '#3b82f6',
@@ -21,17 +21,16 @@ const FORMAT_COLORS: Record<string, string> = {
 };
 
 export default function FileDownloadCard({ format, url, size }: FileDownloadCardProps) {
-    // Assume 24 hour expiry from now (R2 signed URLs)
     const expiryTime = useMemo(() => Date.now() + 24 * 60 * 60 * 1000, []);
     const expiry = useCountdown(expiryTime);
 
     const color = FORMAT_COLORS[format] || '#6b7280';
 
     return (
-        <div className="download-card" style={{ '--accent': color } as React.CSSProperties}>
+        <div className="download-card">
             <div className="download-card-header">
-                <div className="download-card-icon" style={{ background: `${color}20`, color }}>
-                    <FileBox size={24} />
+                <div className="download-card-icon" style={{ background: `${color}15`, color }}>
+                    <Package size={20} />
                 </div>
                 <div className="download-card-meta">
                     <span className="download-card-format">.{format.toUpperCase()}</span>
@@ -47,13 +46,13 @@ export default function FileDownloadCard({ format, url, size }: FileDownloadCard
                 className="download-card-button"
                 style={{ background: color }}
             >
-                <Download size={16} />
+                <Download size={14} />
                 Download
             </a>
 
             <div className="download-card-expiry">
-                <Clock size={12} />
-                <span>Expires in ~{expiry.formatted}</span>
+                <Clock size={11} />
+                <span>~{expiry.formatted}</span>
             </div>
         </div>
     );

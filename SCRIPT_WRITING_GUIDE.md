@@ -284,3 +284,45 @@ With proper scripts, you can create:
 ---
 
 **Write clean, focused scripts. Let BlenderLab handle the heavy lifting. 🚀**
+
+---
+
+## ✨ Spline-Quality Output (Automatic)
+
+BlenderLab now automatically upgrades your geometry with:
+
+- **HDRI lighting** — studio environment map, soft directional light
+- **PBR clearcoat materials** — glossy plastic finish like Spline.design
+- **Bloom + chromatic aberration** — cinematic post-processing
+- **Transparent background** — PNG with alpha, floats on any bg
+- **Shadow catcher** — soft drop shadow beneath your object
+- **Interactive viewer** — drag-to-rotate in the browser, no downloads needed
+- **Auto-framed camera** — camera automatically positions to fit your object
+
+### What this means for your scripts
+
+**Write geometry only.** The worker applies Spline-quality visuals automatically.
+
+If your material already sets a custom color (not the default grey `0.8, 0.8, 0.8`), it will be preserved and only roughness/clearcoat will be upgraded.
+
+### Quality presets
+
+When submitting a job, you can choose from three quality levels:
+
+| Preset | What it does |
+|---|---|
+| **Draft** ⚡ | Fast, basic lighting — skips all automatic upgrades. Use for quick iteration. |
+| **Standard** ✨ | HDRI + PBR clearcoat + bloom + shadow catcher + auto-framed camera. **This is the default.** |
+| **Cinematic** 🎬 | Everything in Standard + volumetric lights + 4K resolution + stronger bloom. |
+
+### Override behaviour
+
+If you want full manual control, add this comment at the top of your script:
+
+```python
+# blenderlab:quality=draft
+```
+
+This skips all automatic upgrades regardless of the selected preset.
+
+---

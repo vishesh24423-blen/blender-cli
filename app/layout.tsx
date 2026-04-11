@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 
@@ -7,6 +7,12 @@ const inter = Inter({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-sans",
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-display",
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -27,7 +33,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable}`}>
       <body>
         <div className="app-container">
           {/* Header */}
@@ -41,10 +47,10 @@ export default function RootLayout({
               </Link>
               <div className="header-links">
                 <Link href="/guide" className="header-link">
-                  📚 Guide
+                  Guide
                 </Link>
                 <a
-                  href="https://github.com"
+                  href="https://github.com/vishesh24423-blen/blender-cli"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="header-link"
@@ -61,7 +67,7 @@ export default function RootLayout({
           {/* Footer */}
           <footer className="app-footer">
             <p className="footer-text">
-              BlenderLab — Headless Blender on GitHub Actions
+              BlenderLab — Headless Blender on GitHub Actions · Spline-Quality Output
             </p>
           </footer>
         </div>
