@@ -215,7 +215,7 @@ print("✅ Material upgrade + compositor complete")
 # ── END POST PASS ─────────────────────────────────────────────────
 `;
 
-function buildScript(userScript, outFile, fmt, quality = 'standard') {
+function buildScript(userScript, outFile, fmt, workDir, quality = 'standard') {
   const indented = String(userScript || '').split('\n').map(l => `    ${l}`).join('\n');
 
   // Check for draft override in script comments
@@ -279,12 +279,6 @@ except Exception as e:
 `;
 }
 
-async function getNextJob() {
-  const snap = await db.collection('jobs').where('status', '==', 'queued').limit(1).get();
-  if (snap.empty) return null;
-  return { id: snap.docs[0].id, ...snap.docs[0].data() };
-}
-
 async function processJob(job) {
   const ref = db.collection('jobs').doc(job.id);
   const runnerRef = db.collection('system').doc('runner');
@@ -308,7 +302,7 @@ async function processJob(job) {
 
       const outFile = path.join(workDir, `output.${fmt}`);
       const scriptPath = path.join(workDir, `export_${fmt}.py`);
-      fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt, quality));
+      fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt, workDir, quality));
 
       try {
         execSync(`blender --background --python ${scriptPath} 2>&1`, {
@@ -380,35 +374,51 @@ async function main() {
   }, { merge: true });
 
   let jobCount = 0;
-  let emptyQueueCount = 0;
+  let isProcessing = false;
+  let heartbeatInterval = setInterval(() => {
+    runnerRef.update({ lastActive: Date.now() });
+  }, 30000);
 
+  // Real-time listener on the jobs collection
+  const unsubscribe = db.collection('jobs')
+    .where('status', '==', 'queued')
+    .orderBy('createdAt', 'asc')
+    .onSnapshot(async (snapshot) => {
+      // Queue empty → do nothing, no timer, no delay
+      if (snapshot.empty || isProcessing) return;
+
+      isProcessing = true;
+      const job = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+
+      try {
+        jobCount++;
+        await processJob(job);
+      } finally {
+        isProcessing = false;
+      }
+
+      // Window expired → stop listening and exit
+      if (Date.now() - startTime >= WINDOW_MS) {
+        console.log(`🛑 Window closed. Processed ${jobCount} jobs.`);
+        clearInterval(heartbeatInterval);
+        unsubscribe();
+        await runnerRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
+        process.exit(0);
+      }
+    }, (err) => {
+      console.error('Firestore listener error:', err);
+    });
+
+  // Keep the process alive until the window expires
   while (Date.now() - startTime < WINDOW_MS) {
-    // Send heartbeat every 30 seconds
-    await runnerRef.update({ lastActive: Date.now() });
-
-    const job = await getNextJob();
-    if (job) {
-      emptyQueueCount = 0; // reset on job found
-      jobCount++;
-      await processJob(job);
-    } else {
-      emptyQueueCount++;
-      // First empty check: poll immediately after 2s
-      // Subsequent empty checks: back off gradually up to 30s
-      const delay = emptyQueueCount === 1
-        ? 2000
-        : Math.min(30000, 2000 * emptyQueueCount);
-      console.log(`⏳ Queue empty, polling again in ${delay / 1000}s...`);
-      await new Promise(r => setTimeout(r, delay));
-    }
+    await new Promise(r => setTimeout(r, 1000));
   }
 
+  // Cleanup on window expiry
   console.log(`🛑 Window closed. Processed ${jobCount} jobs.`);
-  await runnerRef.set({
-    status: 'inactive',
-    lastActive: Date.now(),
-  }, { merge: true });
-
+  clearInterval(heartbeatInterval);
+  unsubscribe();
+  await runnerRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
   process.exit(0);
 }
 
