@@ -23,6 +23,13 @@ const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 100
 const startTime = Date.now();
 
 const EXPORT_CMD = {
+  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB', use_selection=False, export_draco_mesh_compression_enable=True, export_materials='EXPORT', export_apply=True)`,
+  fbx: (f) => `bpy.ops.export_scene.fbx(filepath='${f}', use_selection=False)`,
+  stl: (f) => `bpy.ops.export_mesh.stl(filepath='${f}', use_selection=False)`,
+  usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}', selected_objects_only=False)`,
+};
+
+function buildScript(userScript, outFile, fmt) {
   const indented = String(userScript || '').split('\n').map(l => `    ${l}`).join('\n');
 
   return `
