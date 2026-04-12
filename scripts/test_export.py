@@ -73,8 +73,10 @@ try:
     bpy.ops.export_scene.gltf(
         filepath=export_path,
         export_format='GLB',
-        export_selected_only=False,
-        export_materials=True
+        use_selection=False,
+        export_materials='EXPORT',
+        export_draco_mesh_compression_enable=True,
+        export_apply=True
     )
     
     if os.path.exists(export_path):

@@ -23,10 +23,10 @@ const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 100
 const startTime = Date.now();
 
 const EXPORT_CMD = {
-  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB', export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=6, export_materials='EXPORT', export_colors=True, export_apply=True, export_yup=True, export_normals=True, export_texcoords=True, export_cameras=False, export_lights=False)`,
-  fbx: (f) => `bpy.ops.export_scene.fbx(filepath='${f}')`,
-  stl: (f) => `bpy.ops.export_mesh.stl(filepath='${f}')`,
-  usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}')`,
+  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB', use_selection=False, export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=6, export_materials='EXPORT', export_colors=True, export_apply=True, export_yup=True, export_normals=True, export_texcoords=True, export_cameras=False, export_lights=False)`,
+  fbx: (f) => `bpy.ops.export_scene.fbx(filepath='${f}', use_selection=False, apply_scale_options='FBX_SCALE_ALL')`,
+  stl: (f) => `bpy.ops.export_mesh.stl(filepath='${f}', use_selection=False, use_mesh_modifiers=True)`,
+  usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}', selected_objects_only=False, export_materials=True)`,
 };
 
 const SPLINE_PREAMBLE = `import bpy
@@ -249,6 +249,7 @@ function buildScript(userScript, outFile, fmt, workDir, quality = 'standard') {
   return `
 import bpy, sys, os, traceback
 
+# Clear default scene
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False, confirm=False)
 
@@ -258,11 +259,20 @@ ${indented}
 ${postPass.split('\n').map(l => `    ${l}`).join('\n')}
 except Exception as e:
     traceback.print_exc(file=sys.stderr)
+    print(f"USER_SCRIPT_ERROR: {str(e)}", file=sys.stderr)
     sys.exit(1)
+
+# Verify we have mesh objects to export
+mesh_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH']
+if not mesh_objects:
+    print("ERROR: No mesh objects created. Script must create at least one mesh object.", file=sys.stderr)
+    sys.exit(1)
+
+print(f"Found {len(mesh_objects)} mesh object(s) to export")
 
 # ── PREVIEW THUMBNAIL ─────────────────────────────────────────────
 try:
-    if effectiveQuality != 'draft':
+    if '${effectiveQuality}' != 'draft':
         bpy.context.scene.render.resolution_x = 1200
         bpy.context.scene.render.resolution_y = 800
         bpy.context.scene.render.filepath = '${workDir}/preview.png'
@@ -278,8 +288,10 @@ os.makedirs(os.path.dirname('${outFile}'), exist_ok=True)
 
 try:
     ${EXPORT_CMD[fmt](outFile)}
+    print(f"✅ Export completed: ${fmt}")
 except Exception as e:
     print(f"EXPORT_ERROR: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
     sys.exit(1)
 `;
 }

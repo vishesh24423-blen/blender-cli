@@ -16,12 +16,36 @@ cube.name = "SimpleCube"
 bpy.ops.object.shade_smooth()
 
 
-# SAMPLE 2: Procedural Torus with Material
+# SAMPLE 2: Cube with Subdivision and Material
+# ──────────────────────────────────────────────
+# import bpy
+# 
+# # Create a cube
+# bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
+# cube = bpy.context.active_object
+# cube.name = "MyCube"
+# 
+# # Subdivide for smoother appearance
+# modifier = cube.modifiers.new("Subdivision", 'SUBSURF')
+# modifier.levels = 2
+# 
+# # Apply smooth shading
+# bpy.ops.object.shade_smooth()
+# 
+# # Add a simple material
+# mat = bpy.data.materials.new("CubeMaterial")
+# mat.use_nodes = True
+# bsdf = mat.node_tree.nodes['Principled BSDF']
+# bsdf.inputs['Base Color'].default_value = (0.1, 0.5, 0.9, 1.0)
+# bsdf.inputs['Roughness'].default_value = 0.5
+# cube.data.materials.append(mat)
+
+
+# SAMPLE 3: Procedural Torus with Material
 # ──────────────────────────────────────────
 # import bpy
-# import math
 # 
-# # Create torus using geometry nodes or modifier
+# # Create torus
 # bpy.ops.mesh.primitive_torus_add(location=(0, 0, 0))
 # torus = bpy.context.active_object
 # torus.name = "Torus"
@@ -37,10 +61,9 @@ bpy.ops.object.shade_smooth()
 # bpy.ops.object.shade_smooth()
 
 
-# SAMPLE 3: Array of Objects
+# SAMPLE 4: Array of Objects
 # ──────────────────────────
 # import bpy
-# import math
 # 
 # # Create a grid of spheres
 # for x in range(-2, 3):
@@ -51,7 +74,7 @@ bpy.ops.object.shade_smooth()
 #         bpy.ops.object.shade_smooth()
 
 
-# SAMPLE 4: Custom Mesh from Vertices
+# SAMPLE 5: Custom Mesh from Vertices
 # ────────────────────────────────────
 # import bpy
 # 

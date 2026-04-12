@@ -8,6 +8,8 @@ A cloud-native platform for procedural 3D asset generation. Write Blender Python
 
 ## 🚀 Quick Start
 
+**New to BlenderLab?** See [SETUP_GUIDE.md](./SETUP_GUIDE.md) for complete setup instructions.
+
 ### 1. Prerequisites
 
 - Node.js 20+
@@ -94,6 +96,7 @@ Open [http://localhost:3000](http://localhost:3000) to see the app.
 ## 📖 Documentation
 
 - [**SCRIPT_WRITING_GUIDE.md**](./SCRIPT_WRITING_GUIDE.md) - How to write Blender scripts
+- [**TROUBLESHOOTING.md**](./TROUBLESHOOTING.md) - Common issues and solutions
 - [**SYSTEM_AUDIT.md**](./SYSTEM_AUDIT.md) - Complete system architecture & verification
 - [**ERROR_REFERENCE.md**](./ERROR_REFERENCE.md) - Common errors and solutions
 - [**EXPORT_GUIDE.md**](./EXPORT_GUIDE.md) - Format-specific export options
