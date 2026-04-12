@@ -8,7 +8,6 @@ import { useJob } from '@/hooks/useJob';
 import { useRunner } from '@/hooks/useRunner';
 import { useCountdown } from '@/hooks/useCountdown';
 import QueuePosition from '@/components/QueuePosition';
-import FileDownloadCard from '@/components/FileDownloadCard';
 import ThreeViewer from '@/components/ThreeViewer';
 import Link from 'next/link';
 import { ArrowLeft, RefreshCw, AlertTriangle, Sparkles } from 'lucide-react';
@@ -85,20 +84,42 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
     const status = STATUS_CONFIG[job.status] || STATUS_CONFIG.failed;
 
     return (
-        <div className="job-page">
-            <Link href="/" className="back-link">
+        <div className="min-h-screen bg-[#0a0b0f] text-white">
+            <div className="job-page max-w-5xl mx-auto px-4 py-8">
+            <Link href="/" className="inline-flex items-center gap-2 text-white/60 hover:text-white transition-colors mb-6">
                 <ArrowLeft size={16} /> Back to home
             </Link>
 
             {/* Header */}
-            <div className="job-page-header">
-                <p className="job-id">{jobId}</p>
+            <div className="mb-8">
+                <p className="text-white/40 text-sm mb-2">{jobId}</p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                    <h1 className="job-title">Job Status</h1>
-                    <span className={`status-badge ${status.badgeClass}`}>
-                        <span className={`status-dot ${status.dotClass}`} />
+                    <h1 className="text-3xl font-bold">Job Status</h1>
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+                        job.status === 'done' ? 'bg-emerald-500/20 text-emerald-400' :
+                        job.status === 'processing' ? 'bg-yellow-500/20 text-yellow-400' :
+                        job.status === 'queued' ? 'bg-blue-500/20 text-blue-400' :
+                        'bg-red-500/20 text-red-400'
+                    }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                            job.status === 'done' ? 'bg-emerald-400' :
+                            job.status === 'processing' ? 'bg-yellow-400 animate-pulse' :
+                            job.status === 'queued' ? 'bg-blue-400 animate-pulse' :
+                            'bg-red-400'
+                        }`} />
                         {status.label}
                     </span>
+                    <button
+                        onClick={() => {
+                            if (typeof window !== 'undefined') {
+                                localStorage.setItem('bl_prefill_script', job.script || '')
+                                window.location.href = '/'
+                            }
+                        }}
+                        className="px-4 py-1.5 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                    >
+                        ↺ Regenerate
+                    </button>
                 </div>
             </div>
 
@@ -156,77 +177,42 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
 
             {/* ─── Done ─── */}
             {job.status === 'done' && (
-                <div className="downloads-section">
-                    {/* 3D Viewer — hero position */}
+                <div>
+                    {/* 3D Viewer — full width hero */}
                     {job.outputs?.glb && (
-                        <div style={{ marginBottom: '28px' }}>
-                            <ThreeViewer
-                                glbUrl={job.outputs.glb.url}
-                                className="h-[500px]"
-                            />
-                        </div>
+                        <ThreeViewer
+                            glbUrl={job.outputs.glb.url}
+                            previewUrl={job.outputs.preview}
+                            className="w-full h-[560px] mb-6"
+                        />
                     )}
 
-                    {/* Download section */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-                        <h2 className="downloads-title">Download Files</h2>
-                        <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '5px 12px',
-                            borderRadius: 'var(--radius-full)',
-                            background: 'var(--accent-amber-dim)',
-                            fontSize: '12px',
-                            color: 'var(--accent-amber)',
-                        }}>
-                            <AlertTriangle size={11} />
-                            Expires in 24 hours
-                        </div>
-                    </div>
-
-                    <div className="downloads-grid">
-                        {job.outputs &&
-                            (Object.entries(job.outputs) as [string, { url: string; size?: number }][]).filter(
-                                ([format]) => format !== 'preview'
-                            ).map(([format, file]) => (
-                                <FileDownloadCard
-                                    key={format}
-                                    format={format as OutputFormat}
-                                    url={file.url}
-                                    size={file.size || 0}
-                                />
-                            ))}
-                    </div>
-
-                    {/* Regenerate */}
-                    <div style={{ marginTop: '28px', textAlign: 'center' }}>
-                        <button
-                            onClick={() => {
-                                sessionStorage.setItem('blenderlab_regenerate', JSON.stringify({
-                                    script: job.script,
-                                    formats: job.formats,
-                                }));
-                                router.push('/');
-                            }}
-                            style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                padding: '10px 24px',
-                                borderRadius: 'var(--radius-full)',
-                                background: 'transparent',
-                                border: '1px solid var(--ghost-border)',
-                                color: 'var(--primary)',
-                                cursor: 'pointer',
-                                fontSize: '14px',
-                                fontWeight: 500,
-                                transition: 'all 0.2s',
-                            }}
-                        >
-                            <Sparkles size={15} />
-                            Regenerate with Same Settings
-                        </button>
+                    {/* Download buttons below viewer */}
+                    <div className="flex flex-wrap gap-2 mb-8">
+                        {job.outputs?.glb && (
+                            <a href={job.outputs.glb.url} download
+                                className="px-4 py-2 rounded-full text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white transition-colors">
+                                ↓ GLB
+                            </a>
+                        )}
+                        {job.outputs?.fbx && (
+                            <a href={job.outputs.fbx.url} download
+                                className="px-4 py-2 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 text-white transition-colors">
+                                ↓ FBX
+                            </a>
+                        )}
+                        {job.outputs?.stl && (
+                            <a href={job.outputs.stl.url} download
+                                className="px-4 py-2 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 text-white transition-colors">
+                                ↓ STL
+                            </a>
+                        )}
+                        {job.outputs?.usd && (
+                            <a href={job.outputs.usd.url} download
+                                className="px-4 py-2 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 text-white transition-colors">
+                                ↓ USD
+                            </a>
+                        )}
                     </div>
                 </div>
             )}
@@ -249,15 +235,16 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
             )}
 
             {/* ─── Script Preview ─── */}
-            <div className="script-preview">
-                <div className="script-preview-header">
-                    <span className="script-preview-label">script.py</span>
-                    <span className="script-preview-label">
+            <div className="bg-white/5 rounded-xl p-4 mt-8">
+                <div className="flex items-center justify-between mb-3">
+                    <span className="text-white/60 text-sm">script.py</span>
+                    <span className="text-white/40 text-xs">
                         {job.formats.map((f) => `.${f}`).join(', ')}
                     </span>
                 </div>
-                <pre className="script-preview-code">{job.script}</pre>
+                <pre className="text-white/80 text-sm overflow-x-auto">{job.script}</pre>
             </div>
+        </div>
         </div>
     );
 }

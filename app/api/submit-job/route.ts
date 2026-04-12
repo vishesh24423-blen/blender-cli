@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
         const database = initializeFirebase();
         
         const body = await request.json();
-        const { script, formats } = body;
+        const { script, formats, quality = 'standard' } = body;
 
         if (!script || typeof script !== 'string') {
             return NextResponse.json({ error: 'Script is required' }, { status: 400 });
@@ -48,12 +48,16 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: `Invalid formats: ${invalidFormats.join(', ')}` }, { status: 400 });
         }
 
+        const validQualities = ['draft', 'standard', 'cinematic'];
+        const qualityPreset = validQualities.includes(quality) ? quality : 'standard';
+
         // Create job in Firestore
         const jobRef = await database.collection('jobs').add({
             script,
             userId: 'anonymous',
             status: 'queued',
             formats,
+            quality: qualityPreset,
             outputs: {},
             createdAt: Date.now(),
             error: null,

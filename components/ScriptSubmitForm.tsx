@@ -39,10 +39,19 @@ export default function ScriptSubmitForm() {
     const router = useRouter();
     const [script, setScript] = useState('');
     const [formats, setFormats] = useState<OutputFormat[]>(['glb']);
+    const [quality, setQuality] = useState<'draft' | 'standard' | 'cinematic'>('standard');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        // Prefill from localStorage (for Regenerate button)
+        const prefill = localStorage.getItem('bl_prefill_script')
+        if (prefill) {
+            setScript(prefill)
+            localStorage.removeItem('bl_prefill_script')
+        }
+        
+        // Restore from session storage
         try {
             const data = sessionStorage.getItem('blenderlab_regenerate');
             if (data) {
@@ -74,7 +83,7 @@ export default function ScriptSubmitForm() {
             const res = await fetch('/api/submit-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ script: scriptContent, formats }),
+                body: JSON.stringify({ script: scriptContent, formats, quality }),
             });
 
             const data = await res.json();
@@ -89,6 +98,34 @@ export default function ScriptSubmitForm() {
 
     return (
         <div className="submit-form">
+            {/* Quality Preset Selector */}
+            <div className="mb-4">
+                <p className="text-xs text-white/40 uppercase tracking-widest mb-2">Quality</p>
+                <div className="flex gap-2">
+                    {(['draft', 'standard', 'cinematic'] as const).map((q) => (
+                        <button
+                            key={q}
+                            type="button"
+                            onClick={() => setQuality(q)}
+                            className={`px-4 py-1.5 rounded-full text-xs font-medium capitalize transition-all ${
+                                quality === q
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-white/10 text-white/50 hover:bg-white/20 hover:text-white'
+                            }`}
+                        >
+                            {q === 'draft'     && '⚡ Draft'}
+                            {q === 'standard'  && '✦ Standard'}
+                            {q === 'cinematic' && '◈ Cinematic'}
+                        </button>
+                    ))}
+                </div>
+                <p className="text-xs text-white/30 mt-1.5">
+                    {quality === 'draft'     && 'Fast render, basic lighting. ~30s'}
+                    {quality === 'standard'  && 'HDRI + PBR clearcoat + bloom. ~90s'}
+                    {quality === 'cinematic' && '4K + depth of field + volumetric. ~4min'}
+                </p>
+            </div>
+
             {/* Code Editor */}
             <div className="editor-wrapper">
                 <div className="editor-header">
