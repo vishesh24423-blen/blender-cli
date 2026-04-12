@@ -162,7 +162,6 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                         <div style={{ marginBottom: '28px' }}>
                             <ThreeViewer
                                 glbUrl={job.outputs.glb.url}
-                                posterUrl={job.outputs.preview?.url}
                                 className="h-[500px]"
                             />
                         </div>
