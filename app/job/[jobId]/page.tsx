@@ -12,13 +12,7 @@ import FileDownloadCard from '@/components/FileDownloadCard';
 import ThreeViewer from '@/components/ThreeViewer';
 import Link from 'next/link';
 import { ArrowLeft, RefreshCw, AlertTriangle, Sparkles } from 'lucide-react';
-import type { OutputFormat, QualityPreset } from '@/lib/types';
-
-const QUALITY_LABELS: Record<QualityPreset, string> = {
-    draft: 'Draft',
-    standard: 'Standard',
-    cinematic: 'Cinematic',
-};
+import type { OutputFormat } from '@/lib/types';
 
 const STATUS_CONFIG: Record<string, { label: string; dotClass: string; badgeClass: string }> = {
     queued: { label: 'QUEUED', dotClass: 'status-dot--queued', badgeClass: 'status-badge--queued' },
@@ -105,21 +99,6 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                         <span className={`status-dot ${status.dotClass}`} />
                         {status.label}
                     </span>
-                    {job.quality && (
-                        <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                            padding: '4px 12px',
-                            borderRadius: 'var(--radius-full)',
-                            background: 'var(--primary-dim)',
-                            fontSize: '12px',
-                            color: 'var(--primary)',
-                            fontWeight: 500,
-                        }}>
-                            ✦ {QUALITY_LABELS[job.quality]}
-                        </span>
-                    )}
                 </div>
             </div>
 
@@ -228,7 +207,6 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                                 sessionStorage.setItem('blenderlab_regenerate', JSON.stringify({
                                     script: job.script,
                                     formats: job.formats,
-                                    quality: job.quality || 'standard',
                                 }));
                                 router.push('/');
                             }}
