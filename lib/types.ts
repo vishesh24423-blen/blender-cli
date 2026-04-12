@@ -1,16 +1,10 @@
 export type JobStatus = 'queued' | 'processing' | 'done' | 'failed';
 
-export type OutputFormat = 'glb' | 'fbx' | 'stl' | 'obj' | 'usd';
-
-export type QualityPreset = 'draft' | 'standard' | 'cinematic';
+export type OutputFormat = 'glb' | 'fbx' | 'stl' | 'usd';
 
 export interface OutputFile {
     url: string;
     size: number;
-}
-
-export interface PreviewFile {
-    url: string;
 }
 
 export interface Job {
@@ -19,8 +13,7 @@ export interface Job {
     userId: string;
     status: JobStatus;
     formats: OutputFormat[];
-    quality?: QualityPreset;
-    outputs: Partial<Record<OutputFormat, OutputFile>> & { preview?: PreviewFile };
+    outputs: Partial<Record<OutputFormat, OutputFile>>;
     createdAt: number;
     completedAt?: number;
     error?: string;

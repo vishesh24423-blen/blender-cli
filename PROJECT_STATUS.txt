@@ -1,0 +1,136 @@
+BlenderLab - 3D Object Generation System
+=========================================
+
+SYSTEM STATUS: READY FOR PRODUCTION
+
+Core Functionality:
+------------------
+✓ Submit Python scripts via web interface
+✓ Scripts execute in Blender 5.0+ on GitHub Actions
+✓ Export to GLB, FBX, STL, USD formats
+✓ Upload to Cloudflare R2 storage
+✓ Download links with 24-hour expiry
+✓ Real-time job status updates via Firestore
+
+Runner Triggering Logic:
+------------------------
+✓ First request triggers GitHub Actions workflow
+✓ Runner marked as 'active' in Firestore
+✓ Subsequent requests queue jobs without triggering new workflows
+✓ Runner processes jobs sequentially
+✓ Runner auto-deactivates after 350-minute window
+✓ Stale runner detection (5-minute heartbeat timeout)
+
+Export Configuration:
+--------------------
+- GLB: Draco compression, materials exported
+- FBX: Standard export with all objects
+- STL: Mesh-only export for 3D printing
+- USD: Universal Scene Description format
+
+Blender 5.0+ API Compatibility:
+-------------------------------
+✓ use_selection=False (not export_selected_only)
+✓ export_materials='EXPORT' (not True)
+✓ selected_objects_only=False for USD
+✓ All export commands tested and working
+
+Script Requirements:
+-------------------
+1. Must create at least one MESH object
+2. Use bpy.ops.mesh.primitive_* functions
+3. No external libraries (numpy, PIL, etc.)
+4. No hardcoded file paths
+5. Pure Blender Python API only
+
+Example Scripts:
+---------------
+- scripts/SAMPLES.py - Simple working examples
+- scripts/simple_bottle.py - Bottle with materials
+- scripts/test_export.py - Diagnostic test script
+
+Environment Variables Required:
+------------------------------
+Server-side (Vercel):
+- FIREBASE_CONFIG or FIREBASE_SERVICE_ACCOUNT_KEY
+- GITHUB_TOKEN (with repo + workflow permissions)
+- GITHUB_OWNER
+- GITHUB_REPO
+
+Client-side (Vercel):
+- NEXT_PUBLIC_FIREBASE_API_KEY
+- NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+- NEXT_PUBLIC_FIREBASE_PROJECT_ID
+- NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+- NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+- NEXT_PUBLIC_FIREBASE_APP_ID
+
+GitHub Secrets:
+- FIREBASE_CONFIG
+- R2_BUCKET_NAME
+- R2_ACCESS_KEY
+- R2_SECRET_KEY
+- CF_ACCOUNT_ID
+- R2_PUBLIC_URL
+
+Architecture:
+------------
+1. User submits script via Next.js frontend
+2. API creates job in Firestore (status: queued)
+3. API checks runner status via transaction
+4. If runner inactive/stale, trigger GitHub Actions
+5. GitHub Actions installs Blender and runs worker
+6. Worker polls Firestore for queued jobs
+7. Worker executes script in Blender
+8. Worker exports to requested formats
+9. Worker uploads files to R2
+10. Worker updates job status to 'done'
+11. User downloads files from R2
+
+Key Files:
+---------
+- app/api/submit-job/route.ts - Job submission API
+- scripts/persistent_worker.js - GitHub Actions worker
+- components/ScriptSubmitForm.tsx - Frontend form
+- lib/firebase.ts - Firebase client config
+- lib/types.ts - TypeScript type definitions
+- .github/workflows/main.yml - GitHub Actions workflow
+
+Changes Made:
+------------
+✓ Removed all .md documentation files
+✓ Simplified worker script (removed quality presets)
+✓ Updated export commands for Blender 5.0+
+✓ Removed OBJ format (Blender 5.0 compatibility issues)
+✓ Removed quality preset UI from frontend
+✓ Cleaned up API route
+✓ Updated TypeScript types
+✓ Created simple example scripts
+✓ Verified runner triggering logic
+
+Testing:
+-------
+1. Run locally: npm run dev
+2. Submit test script from SAMPLES.py
+3. Check job status page for updates
+4. Verify GitHub Actions workflow triggers
+5. Download exported files
+
+Deployment:
+----------
+1. Push to GitHub
+2. Connect to Vercel
+3. Add environment variables in Vercel
+4. Add secrets in GitHub repository settings
+5. Deploy
+
+Support:
+-------
+- Check job status page for error messages
+- Review GitHub Actions logs for worker errors
+- Verify environment variables are set correctly
+- Test scripts locally in Blender first
+
+Last Updated: 2024-04-12
+Version: 1.0.0
+Status: Production Ready

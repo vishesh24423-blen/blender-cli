@@ -2,21 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, ChevronDown, Sparkles } from 'lucide-react';
-import type { OutputFormat, QualityPreset } from '@/lib/types';
+import { Check, Sparkles } from 'lucide-react';
+import type { OutputFormat } from '@/lib/types';
 
 const FORMATS: { id: OutputFormat; label: string }[] = [
     { id: 'glb', label: 'GLB' },
     { id: 'fbx', label: 'FBX' },
     { id: 'stl', label: 'STL' },
-    { id: 'obj', label: 'OBJ' },
     { id: 'usd', label: 'USD' },
-];
-
-const QUALITY_PRESETS: { id: QualityPreset; label: string; description: string }[] = [
-    { id: 'draft', label: 'Draft', description: 'Fast, basic lighting — skips upgrades' },
-    { id: 'standard', label: 'Standard', description: 'HDRI + PBR clearcoat + bloom (default)' },
-    { id: 'cinematic', label: 'Cinematic', description: 'Standard + stronger bloom + 4K render' },
 ];
 
 const SAMPLE_SCRIPT = `import bpy
@@ -27,8 +20,8 @@ cube = bpy.context.active_object
 cube.name = "MyCube"
 
 # Subdivide for smoother appearance
-bpy.context.object.modifiers.new("Subdivision", 'SUBSURF')
-bpy.context.object.modifiers["Subdivision"].levels = 2
+modifier = cube.modifiers.new("Subdivision", 'SUBSURF')
+modifier.levels = 2
 
 # Apply smooth shading
 bpy.ops.object.shade_smooth()
@@ -46,19 +39,16 @@ export default function ScriptSubmitForm() {
     const router = useRouter();
     const [script, setScript] = useState('');
     const [formats, setFormats] = useState<OutputFormat[]>(['glb']);
-    const [quality, setQuality] = useState<QualityPreset>('standard');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [qualityOpen, setQualityOpen] = useState(false);
 
     useEffect(() => {
         try {
             const data = sessionStorage.getItem('blenderlab_regenerate');
             if (data) {
-                const { script: savedScript, formats: savedFormats, quality: savedQuality } = JSON.parse(data);
+                const { script: savedScript, formats: savedFormats } = JSON.parse(data);
                 setScript(savedScript);
                 setFormats(savedFormats);
-                if (savedQuality) setQuality(savedQuality);
                 sessionStorage.removeItem('blenderlab_regenerate');
             }
         } catch { /* ignore */ }
@@ -84,7 +74,7 @@ export default function ScriptSubmitForm() {
             const res = await fetch('/api/submit-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ script: scriptContent, formats, quality }),
+                body: JSON.stringify({ script: scriptContent, formats }),
             });
 
             const data = await res.json();
@@ -97,84 +87,8 @@ export default function ScriptSubmitForm() {
         }
     };
 
-    const selectedQuality = QUALITY_PRESETS.find(q => q.id === quality);
-
     return (
         <div className="submit-form">
-            {/* Quality Preset Selector */}
-            <div style={{ position: 'relative' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                    Quality Preset
-                </label>
-                <button
-                    type="button"
-                    onClick={() => setQualityOpen(!qualityOpen)}
-                    style={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '10px 14px',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--surface-container)',
-                        border: '1px solid var(--ghost-border)',
-                        color: 'var(--text-primary)',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                    }}
-                >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: 'var(--primary)' }}>✦</span>
-                        <span>{selectedQuality?.label}</span>
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>— {selectedQuality?.description}</span>
-                    </span>
-                    <ChevronDown size={14} style={{ transition: 'transform 0.15s', transform: qualityOpen ? 'rotate(180deg)' : 'none', color: 'var(--text-muted)' }} />
-                </button>
-
-                {qualityOpen && (
-                    <div style={{
-                        position: 'absolute',
-                        top: 'calc(100% + 4px)',
-                        left: 0,
-                        right: 0,
-                        padding: '6px',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--surface-high)',
-                        border: '1px solid var(--ghost-border)',
-                        backdropFilter: 'blur(12px)',
-                        zIndex: 20,
-                    }}>
-                        {QUALITY_PRESETS.map((q) => (
-                            <button
-                                key={q.id}
-                                type="button"
-                                onClick={() => { setQuality(q.id); setQualityOpen(false); }}
-                                style={{
-                                    width: '100%',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '10px',
-                                    padding: '8px 10px',
-                                    borderRadius: 'var(--radius-sm)',
-                                    background: quality === q.id ? 'var(--primary-dim)' : 'transparent',
-                                    border: 'none',
-                                    color: 'var(--text-primary)',
-                                    cursor: 'pointer',
-                                    fontSize: '13px',
-                                    textAlign: 'left',
-                                }}
-                            >
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: 500 }}>{q.label}</div>
-                                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{q.description}</div>
-                                </div>
-                                {quality === q.id && <Check size={14} color="var(--primary)" />}
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-
             {/* Code Editor */}
             <div className="editor-wrapper">
                 <div className="editor-header">

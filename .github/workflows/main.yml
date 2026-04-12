@@ -32,11 +32,5 @@ jobs:
       - name: Install Blender
         run: sudo snap install blender --classic
 
-      - name: Download HDRI for lighting
-        run: |
-          mkdir -p scripts/assets
-          curl -L "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_03_1k.hdr" \
-            -o scripts/assets/studio_small_03_1k.hdr
-
       - name: Run Worker
         run: node scripts/persistent_worker.js

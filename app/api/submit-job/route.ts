@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
         const database = initializeFirebase();
         
         const body = await request.json();
-        const { script, formats, quality } = body;
+        const { script, formats } = body;
 
         if (!script || typeof script !== 'string') {
             return NextResponse.json({ error: 'Script is required' }, { status: 400 });
@@ -42,22 +42,18 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'At least one format must be selected' }, { status: 400 });
         }
 
-        const validFormats = ['glb', 'fbx', 'stl', 'obj', 'usd'];
+        const validFormats = ['glb', 'fbx', 'stl', 'usd'];
         const invalidFormats = formats.filter((f: string) => !validFormats.includes(f));
         if (invalidFormats.length > 0) {
             return NextResponse.json({ error: `Invalid formats: ${invalidFormats.join(', ')}` }, { status: 400 });
         }
 
-        const validQualities = ['draft', 'standard', 'cinematic'];
-        const qualityPreset = validQualities.includes(quality) ? quality : 'standard';
-
-        // 1. Create job in Firestore (always queued)
+        // Create job in Firestore
         const jobRef = await database.collection('jobs').add({
             script,
             userId: 'anonymous',
             status: 'queued',
             formats,
-            quality: qualityPreset,
             outputs: {},
             createdAt: Date.now(),
             error: null,
