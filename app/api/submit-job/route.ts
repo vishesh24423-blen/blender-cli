@@ -66,96 +66,54 @@ export async function POST(request: NextRequest) {
         const jobId = jobRef.id;
         console.log(`📝 Job created: ${jobId} (${formats.join(", ")})`);
 
-        // 2. Check and activate runner using Transaction (STRICT locking)
+        // 2. Check and activate runner
+        let runnerStatus = 'unknown';
+        let workflowTriggered = false;
+        
         try {
             const runnerDocRef = database.collection('system').doc('runner');
-
-            let shouldTriggerWorkflow = false;
-            let runnerStatus = 'inactive';
 
             await database.runTransaction(async (transaction) => {
                 const runnerDoc = await transaction.get(runnerDocRef);
                 const runnerData = runnerDoc.data();
 
-                runnerStatus = runnerData?.status ?? 'inactive';
+                const currentStatus = runnerData?.status ?? 'inactive';
                 const lastActive = runnerData?.lastActive ?? 0;
                 const now = Date.now();
 
-                // Trigger workflow if runner is NOT currently active
-                // This includes: runner doesn't exist, runner is inactive, or runner is stale
-                const isStale = now - lastActive > 5 * 60 * 1000; // 5 minutes without heartbeat
+                // Trigger workflow if runner is NOT actively processing
+                const isStale = now - lastActive > 5 * 60 * 1000;
+                const needsWake = currentStatus === 'inactive' || isStale;
 
-                if (runnerStatus !== 'active' || isStale) {
-                    shouldTriggerWorkflow = true;
-                    console.log(`🔴 Triggering runner: status=${runnerStatus}, stale=${isStale}`);
+                if (needsWake) {
+                    workflowTriggered = true;
+                    runnerStatus = 'starting';
+                    console.log(`🔴 Waking runner: status=${currentStatus}, stale=${isStale}`);
                     
-                    // Atomically set runner to active with timestamps
                     transaction.set(runnerDocRef, {
-                        status: 'active',
+                        status: 'starting',
                         startedAt: now,
                         lastActive: now,
                         triggeredJobId: jobId,
+                        readyAt: null,
+                        currentJobId: null,
                     }, { merge: true });
                 } else {
-                    console.log(`🟢 Runner already active, queueing job`);
+                    runnerStatus = currentStatus;
+                    console.log(`🟢 Runner ${currentStatus}, job queued`);
                 }
             });
 
-            if (shouldTriggerWorkflow) {
+            if (workflowTriggered) {
                 const githubToken = process.env.GITHUB_TOKEN;
                 const githubOwner = process.env.GITHUB_OWNER;
                 const githubRepo = process.env.GITHUB_REPO;
 
-                // Check if all GitHub env vars are present
                 if (!githubToken || !githubOwner || !githubRepo) {
-                    console.error(`❌ CRITICAL: Cannot trigger workflow - Missing GitHub env vars!`);
-                    console.error(`   GITHUB_TOKEN: ${githubToken ? '✓ set' : '✗ MISSING'}`);
-                    console.error(`   GITHUB_OWNER: ${githubOwner ? '✓ set' : '✗ MISSING'}`);
-                    console.error(`   GITHUB_REPO: ${githubRepo ? '✓ set' : '✗ MISSING'}`);
-                    console.error(`   Job ${jobId} created but WILL NOT PROCESS until GitHub vars are set in Vercel`);
-                    console.error(`   → Vercel Settings → Environment Variables → Add GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO`);
+                    console.error(`❌ Missing GitHub env vars: TOKEN=${!!githubToken}, OWNER=${!!githubOwner}, REPO=${!!githubRepo}`);
                 } else {
                     try {
-                        // --- PRIMARY CHECK: Verify NO active workflow already running ---
-                        const runsUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/runs?status=queued,in_progress&per_page=5`;
-                        console.log(`🔍 Checking for active workflows...`);
-
-                        try {
-                            const runsRes = await fetch(runsUrl, {
-                                headers: {
-                                    Authorization: `Bearer ${githubToken}`,
-                                    Accept: 'application/vnd.github+json',
-                                },
-                            });
-
-                            if (runsRes.ok) {
-                                const runsData = await runsRes.json();
-                                const activeRuns = runsData.workflow_runs?.filter((run: any) => 
-                                    run.status === 'queued' || run.status === 'in_progress'
-                                ) || [];
-
-                                if (activeRuns.length > 0) {
-                                    console.log(`⏩ Found ${activeRuns.length} active workflow(s). NOT triggering new one.`);
-                                    // Mark runner as active since workflow is already running
-                                    await runnerDocRef.set({
-                                        status: 'active',
-                                        lastActive: Date.now(),
-                                    }, { merge: true });
-                                    return NextResponse.json({ jobId }, { status: 201 });
-                                } else {
-                                    console.log(`✅ No active workflows found. Will trigger new one.`);
-                                }
-                            } else {
-                                console.warn(`⚠️ GitHub API returned ${runsRes.status}. Will attempt dispatch.`);
-                            }
-                        } catch (checkError) {
-                            console.warn(`⚠️ GitHub API check failed: ${checkError}. Will attempt dispatch anyway.`);
-                        }
-
-                        // --- TRIGGER WORKFLOW ---
                         const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;
-                        console.log(`📤 Dispatching workflow...`);
-
                         const dispatchRes = await fetch(dispatchUrl, {
                             method: 'POST',
                             headers: {
@@ -170,23 +128,22 @@ export async function POST(request: NextRequest) {
                             console.log(`✅ Workflow dispatched for job ${jobId}`);
                         } else {
                             const errorText = await dispatchRes.text();
-                            console.error(`⚠️ Failed to dispatch workflow: ${dispatchRes.status} ${errorText}`);
-                            // Mark as inactive since trigger failed
+                            console.error(`⚠️ Failed to dispatch workflow: ${dispatchRes.status}`);
                             await runnerDocRef.update({ status: 'inactive' });
+                            runnerStatus = 'inactive';
                         }
                     } catch (ghError) {
                         console.error('⚠️ GitHub dispatch error:', ghError);
                         await runnerDocRef.update({ status: 'inactive' });
+                        runnerStatus = 'inactive';
                     }
                 }
-            } else {
-                console.log(`✅ Job ${jobId} queued — runner already ACTIVE (not triggering new workflow)`);
             }
         } catch (runnerCheckError) {
-            console.error('⚠️ Transaction/Runner check failed:', runnerCheckError);
+            console.error('⚠️ Runner check failed:', runnerCheckError);
         }
 
-        return NextResponse.json({ jobId }, { status: 201 });
+        return NextResponse.json({ jobId, runnerStatus }, { status: 201 });
 
     } catch (err) {
         console.error('Submit job error:', err);

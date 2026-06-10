@@ -548,52 +548,111 @@ async function processJob(job) {
   }
 }
 
+async function markRunner(status, extra = {}) {
+  const runnerRef = db.collection('system').doc('runner');
+  await runnerRef.set({ status, lastActive: Date.now(), ...extra }, { merge: true });
+}
+
+async function processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval) {
+  const snapshot = await db.collection('jobs')
+    .where('status', '==', 'queued')
+    .orderBy('createdAt', 'asc')
+    .limit(1)
+    .get();
+
+  if (snapshot.empty || isProcessingRef.current) return false;
+
+  isProcessingRef.current = true;
+  const job = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+
+  try {
+    jobCountRef.current++;
+    await markRunner('active', { currentJobId: job.id });
+    await processJob(job);
+    await markRunner('ready', { currentJobId: null });
+  } finally {
+    isProcessingRef.current = false;
+  }
+
+  // Check window expiry
+  if (Date.now() - startTime >= WINDOW_MS) {
+    console.log(`🛑 Window closed. Processed ${jobCountRef.current} jobs.`);
+    clearInterval(heartbeatInterval);
+    await markRunner('inactive');
+    process.exit(0);
+  }
+
+  return true;
+}
+
 async function main() {
   const runnerRef = db.collection('system').doc('runner');
   const now = Date.now();
 
   console.log(`🚀 Worker started. Window: ${WINDOW_MS / 60000}min`);
-  console.log(`📊 Setting runner to ACTIVE...`);
+  console.log(`📊 Setting runner to STARTING...`);
 
-  // Mark runner as active
-  await runnerRef.set({
-    status: 'active',
+  // Mark runner as starting (waking up)
+  await markRunner('starting', {
     startedAt: now,
-    lastActive: now,
     windowEndsAt: now + WINDOW_MS,
-  }, { merge: true });
+    readyAt: null,
+    currentJobId: null,
+  });
 
-  let jobCount = 0;
-  let isProcessing = false;
+  // ── Initialization phase ──
+  // Verify Blender is available
+  try {
+    const version = execSync('blender --version', { encoding: 'utf-8', timeout: 10000 });
+    console.log(`✅ Blender: ${version.split('\n')[0]}`);
+  } catch (e) {
+    console.error('❌ Blender not found:', e.message);
+    await markRunner('inactive');
+    process.exit(1);
+  }
+
+  // Verify HDRI assets
+  const hdrPath = path.join(__dirname, 'assets', 'studio_small_03_1k.hdr');
+  if (fs.existsSync(hdrPath)) {
+    console.log(`✅ HDRI asset found: ${hdrPath}`);
+  } else {
+    console.warn(`⚠️ HDRI not found, will use fallback lighting`);
+  }
+
+  // Mark runner as ready — can now accept jobs
+  await markRunner('ready', { readyAt: Date.now() });
+  console.log(`✅ Runner is READY — listening for queued jobs`);
+
+  let jobCountRef = { current: 0 };
+  let isProcessingRef = { current: false };
+
   let heartbeatInterval = setInterval(() => {
-    runnerRef.update({ lastActive: Date.now() });
+    markRunner(isProcessingRef.current ? 'active' : 'ready', { currentJobId: null });
   }, 30000);
 
-  // Real-time listener on the jobs collection
+  // Check for existing queued jobs immediately (catch any that were queued before we started)
+  await processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval);
+
+  // Real-time listener for new queued jobs
   const unsubscribe = db.collection('jobs')
     .where('status', '==', 'queued')
     .orderBy('createdAt', 'asc')
     .onSnapshot(async (snapshot) => {
-      // Queue empty → do nothing, no timer, no delay
-      if (snapshot.empty || isProcessing) return;
-
-      isProcessing = true;
-      const job = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-
-      try {
-        jobCount++;
-        await processJob(job);
-      } finally {
-        isProcessing = false;
+      // Update queue length on the runner
+      if (!isProcessingRef.current) {
+        await runnerRef.update({ queueLength: snapshot.docs.filter(d => d.id !== jobCountRef.current).length });
       }
 
-      // Window expired → stop listening and exit
-      if (Date.now() - startTime >= WINDOW_MS) {
-        console.log(`🛑 Window closed. Processed ${jobCount} jobs.`);
-        clearInterval(heartbeatInterval);
-        unsubscribe();
-        await runnerRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
-        process.exit(0);
+      if (snapshot.empty || isProcessingRef.current) return;
+
+      // Process all queued jobs one by one
+      while (true) {
+        const processed = await processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval);
+        if (!processed) break;
+
+        if (Date.now() - startTime >= WINDOW_MS) {
+          return; // exit will happen inside processNextQueuedJob
+        }
       }
     }, (err) => {
       console.error('Firestore listener error:', err);
@@ -605,10 +664,10 @@ async function main() {
   }
 
   // Cleanup on window expiry
-  console.log(`🛑 Window closed. Processed ${jobCount} jobs.`);
+  console.log(`🛑 Window closed. Processed ${jobCountRef.current} jobs.`);
   clearInterval(heartbeatInterval);
   unsubscribe();
-  await runnerRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
+  await markRunner('inactive');
   process.exit(0);
 }
 

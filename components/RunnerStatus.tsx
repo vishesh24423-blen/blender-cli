@@ -6,7 +6,6 @@ import { useCountdown } from '@/hooks/useCountdown';
 export default function RunnerStatus() {
     const { runner, loading } = useRunner();
     const activeCountdown = useCountdown(runner?.windowEndsAt);
-    const idleCountdown = useCountdown(runner?.nextRunAt);
 
     if (loading) {
         return (
@@ -29,34 +28,61 @@ export default function RunnerStatus() {
     }
 
     const isActive = runner.status === 'active';
+    const isStarting = runner.status === 'starting';
+    const isReady = runner.status === 'ready';
+    const isInactive = runner.status === 'inactive';
+    const isOnline = isActive || isReady || isStarting;
 
     return (
-        <div className={`runner-status ${isActive ? 'runner-status--active' : 'runner-status--idle'}`}>
-            <span className={`runner-dot ${isActive ? 'runner-dot--active' : 'runner-dot--idle'}`} />
+        <div className={`runner-status ${
+            isActive ? 'runner-status--active' :
+            isReady ? 'runner-status--ready' :
+            isStarting ? 'runner-status--starting' :
+            'runner-status--idle'
+        }`}>
+            <span className={`runner-dot ${
+                isActive ? 'runner-dot--active' :
+                isReady ? 'runner-dot--ready' :
+                isStarting ? 'runner-dot--starting' :
+                'runner-dot--idle'
+            }`} />
             <div className="runner-info">
                 <div className="runner-headline">
-                    {isActive ? (
+                    {isActive && (
                         <>
                             <span className="runner-emoji">🟢</span>
-                            <span className="runner-label">Runner ACTIVE</span>
-                            <span className="runner-desc">— jobs process within 15 seconds</span>
+                            <span className="runner-label">Processing...</span>
+                            <span className="runner-desc">— running your script</span>
                         </>
-                    ) : (
+                    )}
+                    {isReady && (
+                        <>
+                            <span className="runner-emoji">🟢</span>
+                            <span className="runner-label">Runner READY</span>
+                            <span className="runner-desc">— processing queue</span>
+                        </>
+                    )}
+                    {isStarting && (
                         <>
                             <span className="runner-emoji">🟡</span>
+                            <span className="runner-label">Runner STARTING</span>
+                            <span className="runner-desc">— waking up...</span>
+                        </>
+                    )}
+                    {isInactive && (
+                        <>
+                            <span className="runner-emoji">⚪</span>
                             <span className="runner-label">Runner IDLE</span>
+                            <span className="runner-desc">— will wake on your request</span>
                         </>
                     )}
                 </div>
                 <div className="runner-countdown">
-                    {isActive ? (
-                        <span>Runner active for: <strong>{activeCountdown.formatted}</strong></span>
+                    {isOnline ? (
+                        <span>Active window: <strong>{activeCountdown.formatted}</strong></span>
                     ) : (
-                        <span>Next run in: <strong>{idleCountdown.formatted}</strong></span>
+                        <span>Waiting for your first request to wake up</span>
                     )}
-                </div>
-                <div className="runner-schedule">
-                    Runs at 5:30AM · 11:30AM · 5:30PM · 11:30PM IST
                 </div>
             </div>
         </div>

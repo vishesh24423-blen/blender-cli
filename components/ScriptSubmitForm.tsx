@@ -35,23 +35,24 @@ bsdf.inputs['Roughness'].default_value = 0.5
 cube.data.materials.append(mat)
 `;
 
+type SubmitPhase = 'idle' | 'submitting' | 'waking-runner' | 'redirecting';
+
 export default function ScriptSubmitForm() {
     const router = useRouter();
     const [script, setScript] = useState('');
     const [formats, setFormats] = useState<OutputFormat[]>(['glb']);
     const [quality, setQuality] = useState<'draft' | 'standard' | 'cinematic'>('standard');
-    const [submitting, setSubmitting] = useState(false);
+    const [phase, setPhase] = useState<SubmitPhase>('idle');
     const [error, setError] = useState<string | null>(null);
+    const [runnerFeedback, setRunnerFeedback] = useState<string>('');
 
     useEffect(() => {
-        // Prefill from localStorage (for Regenerate button)
         const prefill = localStorage.getItem('bl_prefill_script')
         if (prefill) {
             setScript(prefill)
             localStorage.removeItem('bl_prefill_script')
         }
         
-        // Restore from session storage
         try {
             const data = sessionStorage.getItem('blenderlab_regenerate');
             if (data) {
@@ -76,7 +77,7 @@ export default function ScriptSubmitForm() {
             return;
         }
 
-        setSubmitting(true);
+        setPhase('submitting');
         setError(null);
 
         try {
@@ -89,12 +90,21 @@ export default function ScriptSubmitForm() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Failed to submit job');
 
+            if (data.runnerStatus === 'starting') {
+                setPhase('waking-runner');
+                setRunnerFeedback('Runner is waking up...');
+                await new Promise(r => setTimeout(r, 1500));
+            }
+
+            setPhase('redirecting');
             router.push(`/job/${data.jobId}`);
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Something went wrong');
-            setSubmitting(false);
+            setPhase('idle');
         }
     };
+
+    const isBusy = phase !== 'idle';
 
     return (
         <div className="submit-form">
@@ -172,25 +182,49 @@ export default function ScriptSubmitForm() {
             {/* Error */}
             {error && <div className="submit-error">{error}</div>}
 
-            {/* Submit */}
+            {/* Submit / Status */}
             <button
                 id="submit-job-button"
                 className="submit-button"
                 onClick={handleSubmit}
-                disabled={submitting}
+                disabled={isBusy}
             >
-                {submitting ? (
+                {phase === 'submitting' && (
                     <>
                         <span className="submit-spinner" />
                         Submitting...
                     </>
-                ) : (
+                )}
+                {phase === 'waking-runner' && (
+                    <>
+                        <span className="submit-spinner" />
+                        Waking runner...
+                    </>
+                )}
+                {phase === 'redirecting' && (
+                    <>
+                        <span className="submit-spinner" />
+                        Opening job page...
+                    </>
+                )}
+                {phase === 'idle' && (
                     <>
                         <Sparkles size={16} />
                         Generate 3D Assets
                     </>
                 )}
             </button>
+
+            {phase === 'waking-runner' && (
+                <div className="runner-waking-banner">
+                    <div className="runner-waking-dots">
+                        <span className="waking-dot" />
+                        <span className="waking-dot waking-dot--delay1" />
+                        <span className="waking-dot waking-dot--delay2" />
+                    </div>
+                    <span>Starting GitHub Actions runner... Your job will process automatically once ready.</span>
+                </div>
+            )}
         </div>
     );
 }

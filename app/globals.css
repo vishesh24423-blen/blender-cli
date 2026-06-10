@@ -696,27 +696,310 @@ body {
 .glow-purple { box-shadow: 0 0 60px rgba(139, 92, 246, 0.06); }
 .glow-green { box-shadow: 0 0 60px rgba(34, 197, 94, 0.06); }
 
-/* ───────────── Queue Position ───────────── */
-.queue-position {
+/* ───────────── Font Utilities ───────────── */
+.font-display { font-family: var(--font-display); }
+
+/* ───────────── Waking Animation ───────────── */
+.waking-animation {
+  position: relative;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 20px;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.waking-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--primary);
+  animation: waking-ring 2s ease-out infinite;
+  opacity: 0;
+}
+
+.waking-ring--2 { animation-delay: 0.6s; }
+.waking-ring--3 { animation-delay: 1.2s; }
+
+@keyframes waking-ring {
+  0% { transform: scale(0.5); opacity: 0.8; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+.waking-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-full);
+  background: var(--primary-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  z-index: 1;
+}
+
+/* ───────────── Processing Bar ───────────── */
+.processing-bar {
+  width: 200px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-high);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.processing-bar-fill {
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, var(--primary), var(--primary-container));
+  border-radius: 2px;
+  animation: processing-bar 2s ease-in-out infinite;
+}
+
+@keyframes processing-bar {
+  0% { transform: translateX(-100%); width: 30%; }
+  50% { width: 50%; }
+  100% { transform: translateX(300%); width: 30%; }
+}
+
+/* ───────────── Queue Position Card ───────────── */
+.queue-position-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
   border-radius: var(--radius-lg);
   background: var(--accent-blue-dim);
 }
 
-.queue-position-text { display: flex; flex-direction: column; gap: 2px; }
-.queue-position-label { font-size: 12px; color: var(--text-muted); }
-.queue-position-number {
-  font-size: 22px;
+.queue-position-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  background: var(--accent-blue);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.queue-position-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.queue-pos-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.queue-pos-number { font-size: 28px; font-weight: 800; color: var(--accent-blue); font-family: var(--font-mono); line-height: 1; }
+
+.queue-position-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(59, 130, 246, 0.15);
+  overflow: hidden;
+  grid-column: 1 / -1;
+}
+
+.queue-bar-fill {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: 2px;
+  transition: width 2s ease;
+}
+
+/* ───────────── Status Banner ───────────── */
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.status-banner--active {
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+}
+
+.banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent-green);
+  flex-shrink: 0;
+}
+
+.banner-dot--pulse {
+  animation: pulse-green 1.5s infinite;
+}
+
+/* ───────────── Success Banner ───────────── */
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 24px;
+}
+
+/* ───────────── Download Card (New) ───────────── */
+.downloads-section {
+  margin-bottom: 32px;
+}
+
+.downloads-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.downloads-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.download-card-new {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-container);
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s;
+  border: 1px solid var(--ghost-border);
+}
+
+.download-card-new:hover {
+  background: var(--surface-high);
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.download-card-new-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--primary-dim);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.download-card-new-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.download-card-new-format {
+  font-size: 15px;
   font-weight: 700;
-  color: var(--accent-blue);
   font-family: var(--font-mono);
 }
 
-/* Error */
+.download-card-new-size {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* ───────────── Runner Waking Banner ───────────── */
+.runner-waking-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  background: var(--accent-amber-dim);
+  color: var(--accent-amber);
+  font-size: 13px;
+}
+
+.runner-waking-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.waking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent-amber);
+  animation: waking-dot 1.4s ease-in-out infinite;
+}
+
+.waking-dot--delay1 { animation-delay: 0.2s; }
+.waking-dot--delay2 { animation-delay: 0.4s; }
+
+@keyframes waking-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1.2); }
+}
+
+/* ───────────── Runner Ready Status ───────────── */
+.runner-status--ready {
+  background: linear-gradient(135deg, var(--accent-green-dim), transparent);
+}
+
+.runner-status--starting {
+  background: linear-gradient(135deg, var(--accent-amber-dim), transparent);
+}
+
+.runner-dot--ready {
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
+}
+
+.runner-dot--starting {
+  background: var(--accent-amber);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  animation: pulse-amber 1.5s infinite;
+}
+
+@keyframes pulse-amber {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ───────────── Job Page Container ───────────── */
+.job-page-container {
+  min-height: 100vh;
+  background: #0a0b0f;
+  color: white;
+}
+
+/* ───────────── Error Section ───────────── */
 .error-section { display: flex; flex-direction: column; gap: 16px; }
+
+.error-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.error-title {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--font-display);
+}
+
 .error-message {
   padding: 14px 16px;
   border-radius: var(--radius);

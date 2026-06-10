@@ -22,7 +22,7 @@ export interface Job {
     error?: string;
 }
 
-export type RunnerStatusType = 'active' | 'inactive';
+export type RunnerStatusType = 'active' | 'inactive' | 'starting' | 'ready';
 
 export interface RunnerInfo {
     status: RunnerStatusType;
@@ -30,4 +30,7 @@ export interface RunnerInfo {
     windowEndsAt: number;
     currentJobId: string | null;
     lastUpdated: number;
+    readyAt?: number;
+    startedAt?: number;
+    queueLength?: number;
 }
