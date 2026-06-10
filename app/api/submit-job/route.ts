@@ -111,6 +111,8 @@ export async function POST(request: NextRequest) {
 
                 if (!githubToken || !githubOwner || !githubRepo) {
                     console.error(`❌ Missing GitHub env vars: TOKEN=${!!githubToken}, OWNER=${!!githubOwner}, REPO=${!!githubRepo}`);
+                    await runnerDocRef.update({ status: 'inactive' });
+                    runnerStatus = 'error';
                 } else {
                     try {
                         const dispatchUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/workflows/main.yml/dispatches`;

@@ -553,17 +553,27 @@ async function markRunner(status, extra = {}) {
   await runnerRef.set({ status, lastActive: Date.now(), ...extra }, { merge: true });
 }
 
-async function processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval) {
+async function getOldestQueuedJob() {
+  // Use simple query to avoid requiring composite index
   const snapshot = await db.collection('jobs')
     .where('status', '==', 'queued')
-    .orderBy('createdAt', 'asc')
-    .limit(1)
     .get();
 
-  if (snapshot.empty || isProcessingRef.current) return false;
+  if (snapshot.empty) return null;
+
+  // Sort in-memory by createdAt ascending
+  const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+  docs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  return docs[0];
+}
+
+async function processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval) {
+  if (isProcessingRef.current) return false;
+
+  const job = await getOldestQueuedJob();
+  if (!job) return false;
 
   isProcessingRef.current = true;
-  const job = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
 
   try {
     jobCountRef.current++;
@@ -633,42 +643,26 @@ async function main() {
   // Check for existing queued jobs immediately (catch any that were queued before we started)
   await processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval);
 
-  // Real-time listener for new queued jobs
-  const unsubscribe = db.collection('jobs')
-    .where('status', '==', 'queued')
-    .orderBy('createdAt', 'asc')
-    .onSnapshot(async (snapshot) => {
-      // Update queue length on the runner
-      if (!isProcessingRef.current) {
-        await runnerRef.update({ queueLength: snapshot.docs.filter(d => d.id !== jobCountRef.current).length });
-      }
+  // Poll for new queued jobs every 10 seconds (avoids composite index requirement)
+  const pollInterval = setInterval(async () => {
+    try {
+      await processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval);
+    } catch (err) {
+      console.error('Poll error:', err);
+    }
 
-      if (snapshot.empty || isProcessingRef.current) return;
+    if (Date.now() - startTime >= WINDOW_MS) {
+      clearInterval(pollInterval);
+      clearInterval(heartbeatInterval);
+      await markRunner('inactive');
+      process.exit(0);
+    }
+  }, 10000);
 
-      // Process all queued jobs one by one
-      while (true) {
-        const processed = await processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, heartbeatInterval);
-        if (!processed) break;
-
-        if (Date.now() - startTime >= WINDOW_MS) {
-          return; // exit will happen inside processNextQueuedJob
-        }
-      }
-    }, (err) => {
-      console.error('Firestore listener error:', err);
-    });
-
-  // Keep the process alive until the window expires
-  while (Date.now() - startTime < WINDOW_MS) {
-    await new Promise(r => setTimeout(r, 1000));
+  // Keep the process alive — main loop handles expiry via pollInterval
+  while (true) {
+    await new Promise(r => setTimeout(r, 5000));
   }
-
-  // Cleanup on window expiry
-  console.log(`🛑 Window closed. Processed ${jobCountRef.current} jobs.`);
-  clearInterval(heartbeatInterval);
-  unsubscribe();
-  await markRunner('inactive');
-  process.exit(0);
 }
 
 main().catch(err => { console.error('Crashed:', err); process.exit(1); });

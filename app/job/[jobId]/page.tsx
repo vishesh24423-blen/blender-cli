@@ -11,20 +11,18 @@ import Link from 'next/link';
 import { ArrowLeft, AlertTriangle, Clock, CheckCircle, Download, Sparkles, RefreshCw } from 'lucide-react';
 import type { RunnerInfo } from '@/lib/types';
 
-const STATUS_CONFIG: Record<string, { label: string; dotClass: string; badgeClass: string }> = {
-    queued: { label: 'QUEUED', dotClass: 'status-dot--queued', badgeClass: 'status-badge--queued' },
-    processing: { label: 'PROCESSING', dotClass: 'status-dot--processing', badgeClass: 'status-badge--processing' },
-    done: { label: 'COMPLETED', dotClass: 'status-dot--done', badgeClass: 'status-badge--done' },
-    failed: { label: 'FAILED', dotClass: 'status-dot--failed', badgeClass: 'status-badge--failed' },
+const STATUS_CONFIG: Record<string, { label: string }> = {
+    queued: { label: 'QUEUED' },
+    processing: { label: 'PROCESSING' },
+    done: { label: 'COMPLETED' },
+    failed: { label: 'FAILED' },
 };
 
-interface JobPageProps {
-    params: Promise<{ jobId: string }>;
-}
+const RUNNER_WAKE_TIMEOUT = 120_000; // 2 minutes before showing error
 
 function RunnerWakingState() {
     return (
-        <div className="status-card glow-purple">
+        <div className="status-card">
             <div className="status-card-center">
                 <div className="waking-animation">
                     <div className="waking-ring" />
@@ -34,8 +32,8 @@ function RunnerWakingState() {
                         <Sparkles size={24} />
                     </div>
                 </div>
-                <p className="processing-text">Waking up the runner...</p>
-                <p className="processing-sub">
+                <p className="text-base font-medium">Waking up the runner...</p>
+                <p className="text-sm text-white/40 text-center max-w-sm">
                     A GitHub Actions runner is being started. This takes about 30-60 seconds.
                 </p>
             </div>
@@ -45,12 +43,12 @@ function RunnerWakingState() {
 
 function RunnerStartingState() {
     return (
-        <div className="status-card glow-purple">
+        <div className="status-card">
             <div className="status-card-center">
                 <div className="processing-spinner" />
-                <p className="processing-text">Runner is starting up...</p>
-                <p className="processing-sub">
-                    Installing Blender and initializing the environment. Ready in a few seconds.
+                <p className="text-base font-medium">Runner is starting up...</p>
+                <p className="text-sm text-white/40 text-center max-w-sm">
+                    Installing Blender and initializing the environment. Almost ready.
                 </p>
             </div>
         </div>
@@ -59,52 +57,52 @@ function RunnerStartingState() {
 
 function QueuedState({ queuePosition, runner }: { queuePosition: number | null; runner: RunnerInfo | null }) {
     return (
-        <div className="status-card glow-purple">
-            <div className="flex flex-col gap-4">
-                {queuePosition !== null && (
-                    <div className="queue-position-card">
-                        <div className="queue-position-icon">
-                            <Clock size={20} />
+        <div className="status-card">
+            {queuePosition !== null && (
+                <div className="queue-position-card">
+                    <div className="queue-pos-left">
+                        <div className="queue-pos-icon">
+                            <Clock size={18} />
                         </div>
-                        <div className="queue-position-info">
+                        <div className="queue-pos-info">
                             <span className="queue-pos-label">Queue Position</span>
                             <span className="queue-pos-number">#{queuePosition}</span>
                         </div>
-                        <div className="queue-position-bar">
-                            <div className="queue-bar-fill" style={{ width: `${Math.max(0, 100 - (queuePosition - 1) * 33)}%` }} />
-                        </div>
                     </div>
-                )}
+                    <div className="queue-pos-bar">
+                        <div className="queue-bar-fill" style={{ width: `${Math.max(10, 100 - (queuePosition - 1) * 30)}%` }} />
+                    </div>
+                </div>
+            )}
 
-                {runner && (runner.status === 'ready' || runner.status === 'active') && (
-                    <div className="status-banner status-banner--active">
-                        <div className="banner-dot banner-dot--pulse" />
-                        <span>Runner is {runner.status === 'active' ? 'processing' : 'ready'} — your job will be picked up shortly</span>
-                    </div>
-                )}
-            </div>
+            {runner && (runner.status === 'ready' || runner.status === 'active') && (
+                <div className="banner banner--active">
+                    <span className="banner-dot" />
+                    <span>Runner is {runner.status === 'active' ? 'processing' : 'ready'} — your job will be picked up shortly</span>
+                </div>
+            )}
         </div>
     );
 }
 
 function ProcessingState() {
     return (
-        <div className="status-card glow-purple">
+        <div className="status-card">
             <div className="status-card-center">
                 <div className="processing-spinner" />
-                <p className="processing-text">Blender is running your script...</p>
-                <p className="processing-sub">
+                <p className="text-base font-medium">Blender is running your script...</p>
+                <p className="text-sm text-white/40 text-center max-w-sm">
                     This usually takes 30 seconds to a few minutes depending on complexity
                 </p>
-                <div className="processing-bar">
-                    <div className="processing-bar-fill" />
+                <div className="progress-bar">
+                    <div className="progress-bar-fill" />
                 </div>
             </div>
         </div>
     );
 }
 
-function DoneState({ job, jobId }: { job: any; jobId: string }) {
+function DoneState({ job }: { job: any }) {
     const viewerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -117,24 +115,21 @@ function DoneState({ job, jobId }: { job: any; jobId: string }) {
 
     return (
         <div>
-            {/* Success banner */}
             <div className="success-banner">
                 <CheckCircle size={20} />
                 <span>Your 3D asset is ready!</span>
             </div>
 
-            {/* 3D Viewer */}
             {job.outputs?.glb && (
                 <div ref={viewerRef}>
                     <ThreeViewer
                         glbUrl={job.outputs.glb.url}
                         previewUrl={job.outputs.preview}
-                        className="w-full h-[560px] mb-6"
+                        className="viewer-3d"
                     />
                 </div>
             )}
 
-            {/* Download section */}
             <div className="downloads-section">
                 <h3 className="downloads-title">Downloads</h3>
                 <div className="downloads-grid">
@@ -142,18 +137,13 @@ function DoneState({ job, jobId }: { job: any; jobId: string }) {
                         const file = job.outputs?.[fmt];
                         if (!file) return null;
                         return (
-                            <a
-                                key={fmt}
-                                href={file.url}
-                                download
-                                className="download-card-new"
-                            >
-                                <div className="download-card-new-icon">
-                                    <Download size={18} />
+                            <a key={fmt} href={file.url} download className="download-card">
+                                <div className="download-card-icon">
+                                    <Download size={16} />
                                 </div>
-                                <div className="download-card-new-info">
-                                    <span className="download-card-new-format">.{fmt.toUpperCase()}</span>
-                                    <span className="download-card-new-size">
+                                <div className="download-card-info">
+                                    <span className="download-card-format">.{fmt.toUpperCase()}</span>
+                                    <span className="download-card-size">
                                         {file.size ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : ''}
                                     </span>
                                 </div>
@@ -184,25 +174,59 @@ function FailedState({ job, onRetry }: { job: any; onRetry: () => void }) {
     );
 }
 
-export default function JobPage({ params }: JobPageProps) {
+function RunnerTimeoutState() {
+    return (
+        <div className="status-card">
+            <div className="status-card-center gap-3">
+                <AlertTriangle size={28} color="var(--accent-amber)" />
+                <p className="text-base font-medium">Runner is taking longer than expected</p>
+                <p className="text-sm text-white/40 text-center max-w-sm">
+                    The GitHub Actions runner may still be starting up. Your job is queued and will process automatically once the runner connects.
+                </p>
+                <Link href="/" className="retry-button">
+                    <ArrowLeft size={14} />
+                    Back to home
+                </Link>
+            </div>
+        </div>
+    );
+}
+
+function RunnerErrorState() {
+    return (
+        <div className="status-card">
+            <div className="status-card-center gap-3">
+                <AlertTriangle size={28} color="var(--accent-red)" />
+                <p className="text-base font-medium">Runner failed to start</p>
+                <p className="text-sm text-white/40 text-center max-w-sm">
+                    The GitHub Actions runner could not be started. Make sure the repository has Actions enabled and the required secrets are configured.
+                </p>
+                <Link href="/" className="retry-button">
+                    <ArrowLeft size={14} />
+                    Back to home
+                </Link>
+            </div>
+        </div>
+    );
+}
+
+export default function JobPage({ params }: { params: Promise<{ jobId: string }> }) {
     const { jobId } = use(params);
     const router = useRouter();
     const { job, loading, error } = useJob(jobId);
     const { runner } = useRunner();
     const [queuePosition, setQueuePosition] = useState<number | null>(null);
-    const [runnerPhase, setRunnerPhase] = useState<string>('unknown');
+    const [wakeTimeout, setWakeTimeout] = useState(false);
+    const wakeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     const isQueued = job?.status === 'queued';
 
-    // Track runner phase for waking/starting states
-    useEffect(() => {
-        if (!runner) return;
-        setRunnerPhase(runner.status);
-    }, [runner]);
-
     // Queue position polling
     useEffect(() => {
-        if (!isQueued) return;
+        if (!isQueued) {
+            setQueuePosition(null);
+            return;
+        }
 
         const fetchPosition = async () => {
             try {
@@ -213,7 +237,7 @@ export default function JobPage({ params }: JobPageProps) {
                 );
                 const snap = await getDocs(q);
                 const position = snap.docs.findIndex((d) => d.id === jobId) + 1;
-                setQueuePosition(position > 0 ? position : 1);
+                setQueuePosition(position > 0 ? position : null);
             } catch {
                 setQueuePosition(null);
             }
@@ -223,6 +247,38 @@ export default function JobPage({ params }: JobPageProps) {
         const interval = setInterval(fetchPosition, 5000);
         return () => clearInterval(interval);
     }, [isQueued, jobId]);
+
+    // Timeout for waking state
+    useEffect(() => {
+        if (!isQueued) {
+            setWakeTimeout(false);
+            if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+            return;
+        }
+
+        const isWaking = !runner || runner.status === 'inactive' || runner.status === 'starting';
+        if (!isWaking) {
+            setWakeTimeout(false);
+            if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+            return;
+        }
+
+        wakeTimerRef.current = setTimeout(() => {
+            setWakeTimeout(true);
+        }, RUNNER_WAKE_TIMEOUT);
+
+        return () => {
+            if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+        };
+    }, [isQueued, runner?.status]);
+
+    // If runner finally becomes ready/active, clear timeout
+    useEffect(() => {
+        if (runner && (runner.status === 'ready' || runner.status === 'active')) {
+            setWakeTimeout(false);
+            if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+        }
+    }, [runner?.status]);
 
     const handleRetry = () => router.push('/');
 
@@ -241,9 +297,9 @@ export default function JobPage({ params }: JobPageProps) {
                     <ArrowLeft size={16} /> Back to home
                 </Link>
                 <div className="status-card">
-                    <div className="status-card-center">
+                    <div className="status-card-center gap-3">
                         <AlertTriangle size={36} color="var(--accent-red)" />
-                        <p className="processing-text">{error || 'Job not found'}</p>
+                        <p className="text-base font-medium">{error || 'Job not found'}</p>
                         <Link href="/" className="retry-button">
                             <ArrowLeft size={14} /> Go back
                         </Link>
@@ -255,68 +311,77 @@ export default function JobPage({ params }: JobPageProps) {
 
     const status = STATUS_CONFIG[job.status] || STATUS_CONFIG.failed;
 
-    // Determine if we should show "waking runner" state - 
-    // job is queued but runner is inactive/starting
-    const showWakingRunner = isQueued && runner && (runner.status === 'inactive' || runner.status === 'starting');
-    const showQueued = isQueued && runner && (runner.status === 'ready' || runner.status === 'active');
-    // If no runner data yet but job is queued, show waking state
-    const showWakingUnknown = isQueued && !runner;
+    const getStatusBadgeClass = () => {
+        switch (job.status) {
+            case 'done': return 'badge badge--done';
+            case 'processing': return 'badge badge--processing';
+            case 'queued': return 'badge badge--queued';
+            case 'failed': return 'badge badge--failed';
+            default: return 'badge';
+        }
+    };
+
+    const getStatusDotClass = () => {
+        switch (job.status) {
+            case 'done': return 'dot dot--done';
+            case 'processing': return 'dot dot--processing';
+            case 'queued': return 'dot dot--queued';
+            case 'failed': return 'dot dot--failed';
+            default: return 'dot';
+        }
+    };
+
+    const isWaking = isQueued && (!runner || runner.status === 'inactive');
+    const isStarting = isQueued && runner?.status === 'starting';
+    const isReallyQueued = isQueued && runner && (runner.status === 'ready' || runner.status === 'active');
 
     return (
-        <div className="job-page-container">
-            <div className="job-page max-w-5xl mx-auto px-4 py-8">
-                <Link href="/" className="inline-flex items-center gap-2 text-white/60 hover:text-white transition-colors mb-6">
+        <div className="page-root">
+            <div className="page-container">
+                <Link href="/" className="back-link">
                     <ArrowLeft size={16} /> Back to home
                 </Link>
 
                 {/* Job Header */}
-                <div className="mb-8">
-                    <p className="text-white/40 text-xs font-mono mb-2">{jobId}</p>
-                    <div className="flex items-center gap-3 flex-wrap">
-                        <h1 className="text-3xl font-bold font-display">Job Status</h1>
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-                            job.status === 'done' ? 'bg-emerald-500/20 text-emerald-400' :
-                            job.status === 'processing' ? 'bg-yellow-500/20 text-yellow-400' :
-                            job.status === 'queued' ? 'bg-blue-500/20 text-blue-400' :
-                            'bg-red-500/20 text-red-400'
-                        }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${
-                                job.status === 'done' ? 'bg-emerald-400' :
-                                job.status === 'processing' ? 'bg-yellow-400 animate-pulse' :
-                                job.status === 'queued' ? 'bg-blue-400 animate-pulse' :
-                                'bg-red-400'
-                            }`} />
+                <div className="job-header">
+                    <div className="job-header-top">
+                        <h1 className="job-title">Job Status</h1>
+                        <span className={getStatusBadgeClass()}>
+                            <span className={getStatusDotClass()} />
                             {status.label}
                         </span>
+                    </div>
+                    <p className="job-id">{jobId}</p>
+                    <div className="job-actions">
                         <button
                             onClick={() => {
-                                if (typeof window !== 'undefined') {
-                                    localStorage.setItem('bl_prefill_script', job.script || '')
-                                    window.location.href = '/'
-                                }
+                                localStorage.setItem('bl_prefill_script', job.script || '')
+                                window.location.href = '/'
                             }}
-                            className="px-3 py-1 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                            className="btn-ghost"
                         >
                             ↺ Regenerate
                         </button>
                     </div>
                 </div>
 
-                {/* ─── Status Content ─── */}
-                {job.status === 'queued' && showWakingUnknown && <RunnerWakingState />}
-                {job.status === 'queued' && runnerPhase === 'starting' && <RunnerStartingState />}
-                {job.status === 'queued' && showQueued && <QueuedState queuePosition={queuePosition} runner={runner} />}
-                {job.status === 'queued' && showWakingRunner && runnerPhase !== 'starting' && <RunnerWakingState />}
+                {/* Status Content */}
+                {job.status === 'queued' && wakeTimeout && <RunnerTimeoutState />}
+                {job.status === 'queued' && !wakeTimeout && isWaking && <RunnerWakingState />}
+                {job.status === 'queued' && !wakeTimeout && isStarting && <RunnerStartingState />}
+                {job.status === 'queued' && !wakeTimeout && isReallyQueued && (
+                    <QueuedState queuePosition={queuePosition} runner={runner} />
+                )}
 
                 {job.status === 'processing' && <ProcessingState />}
-                {job.status === 'done' && <DoneState job={job} jobId={jobId} />}
+                {job.status === 'done' && <DoneState job={job} />}
                 {job.status === 'failed' && <FailedState job={job} onRetry={handleRetry} />}
 
-                {/* ─── Script Preview ─── */}
-                <div className="script-preview mt-8">
+                {/* Script Preview */}
+                <div className="script-preview">
                     <div className="script-preview-header">
                         <span className="script-preview-label">script.py</span>
-                        <span className="text-white/40 text-xs">
+                        <span className="script-preview-meta">
                             {job.quality && <span className="capitalize">{job.quality}</span>}
                             {' · '}
                             {job.formats.map((f) => `.${f}`).join(', ')}

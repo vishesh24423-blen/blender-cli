@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Sparkles } from 'lucide-react';
+import { Check, Sparkles, AlertTriangle } from 'lucide-react';
 import type { OutputFormat } from '@/lib/types';
 
 const FORMATS: { id: OutputFormat; label: string }[] = [
@@ -44,7 +44,6 @@ export default function ScriptSubmitForm() {
     const [quality, setQuality] = useState<'draft' | 'standard' | 'cinematic'>('standard');
     const [phase, setPhase] = useState<SubmitPhase>('idle');
     const [error, setError] = useState<string | null>(null);
-    const [runnerFeedback, setRunnerFeedback] = useState<string>('');
 
     useEffect(() => {
         const prefill = localStorage.getItem('bl_prefill_script')
@@ -90,9 +89,14 @@ export default function ScriptSubmitForm() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Failed to submit job');
 
+            if (data.runnerStatus === 'error') {
+                setPhase('idle');
+                setError('Runner failed to start. Check GitHub Actions configuration.');
+                return;
+            }
+
             if (data.runnerStatus === 'starting') {
                 setPhase('waking-runner');
-                setRunnerFeedback('Runner is waking up...');
                 await new Promise(r => setTimeout(r, 1500));
             }
 
@@ -109,30 +113,28 @@ export default function ScriptSubmitForm() {
     return (
         <div className="submit-form">
             {/* Quality Preset Selector */}
-            <div className="mb-4">
-                <p className="text-xs text-white/40 uppercase tracking-widest mb-2">Quality</p>
-                <div className="flex gap-2">
+            <div className="quality-selector">
+                <p className="section-label">Quality</p>
+                <div className="quality-options">
                     {(['draft', 'standard', 'cinematic'] as const).map((q) => (
                         <button
                             key={q}
                             type="button"
                             onClick={() => setQuality(q)}
-                            className={`px-4 py-1.5 rounded-full text-xs font-medium capitalize transition-all ${
-                                quality === q
-                                    ? 'bg-purple-600 text-white'
-                                    : 'bg-white/10 text-white/50 hover:bg-white/20 hover:text-white'
-                            }`}
+                            className={`quality-chip ${quality === q ? 'quality-chip--active' : ''}`}
                         >
-                            {q === 'draft'     && '⚡ Draft'}
-                            {q === 'standard'  && '✦ Standard'}
-                            {q === 'cinematic' && '◈ Cinematic'}
+                            {q === 'draft'     && '⚡'}
+                            {q === 'standard'  && '✦'}
+                            {q === 'cinematic' && '◈'}
+                            {' '}
+                            {q.charAt(0).toUpperCase() + q.slice(1)}
                         </button>
                     ))}
                 </div>
-                <p className="text-xs text-white/30 mt-1.5">
-                    {quality === 'draft'     && 'Fast render, basic lighting. ~30s'}
-                    {quality === 'standard'  && 'HDRI + PBR clearcoat + bloom. ~90s'}
-                    {quality === 'cinematic' && '4K + depth of field + volumetric. ~4min'}
+                <p className="quality-hint">
+                    {quality === 'draft'     && 'Fast render, basic lighting · ~30s'}
+                    {quality === 'standard'  && 'HDRI + PBR clearcoat + bloom · ~90s'}
+                    {quality === 'cinematic' && '4K + DOF + volumetric · ~4min'}
                 </p>
             </div>
 
@@ -160,7 +162,7 @@ export default function ScriptSubmitForm() {
 
             {/* Format Selector */}
             <div className="format-selector">
-                <label className="format-label">Output Formats</label>
+                <label className="section-label">Output Formats</label>
                 <div className="format-options">
                     {FORMATS.map((f) => {
                         const selected = formats.includes(f.id);
@@ -180,9 +182,14 @@ export default function ScriptSubmitForm() {
             </div>
 
             {/* Error */}
-            {error && <div className="submit-error">{error}</div>}
+            {error && (
+                <div className="submit-error">
+                    <AlertTriangle size={14} />
+                    {error}
+                </div>
+            )}
 
-            {/* Submit / Status */}
+            {/* Submit Button */}
             <button
                 id="submit-job-button"
                 className="submit-button"
@@ -190,28 +197,16 @@ export default function ScriptSubmitForm() {
                 disabled={isBusy}
             >
                 {phase === 'submitting' && (
-                    <>
-                        <span className="submit-spinner" />
-                        Submitting...
-                    </>
+                    <><span className="submit-spinner" /> Submitting...</>
                 )}
                 {phase === 'waking-runner' && (
-                    <>
-                        <span className="submit-spinner" />
-                        Waking runner...
-                    </>
+                    <><span className="submit-spinner" /> Waking runner...</>
                 )}
                 {phase === 'redirecting' && (
-                    <>
-                        <span className="submit-spinner" />
-                        Opening job page...
-                    </>
+                    <><span className="submit-spinner" /> Opening job page...</>
                 )}
                 {phase === 'idle' && (
-                    <>
-                        <Sparkles size={16} />
-                        Generate 3D Assets
-                    </>
+                    <><Sparkles size={16} /> Generate 3D Assets</>
                 )}
             </button>
 
@@ -222,7 +217,7 @@ export default function ScriptSubmitForm() {
                         <span className="waking-dot waking-dot--delay1" />
                         <span className="waking-dot waking-dot--delay2" />
                     </div>
-                    <span>Starting GitHub Actions runner... Your job will process automatically once ready.</span>
+                    <span>Starting GitHub Actions runner... redirecting to job page.</span>
                 </div>
             )}
         </div>
