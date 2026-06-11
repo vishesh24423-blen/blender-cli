@@ -24,40 +24,61 @@ const startTime = Date.now();
 
 const EXPORT_CMD = {
   glb: (f) => `
-# Try multiple export methods for Blender 5.x compatibility
 out_path = '${f}'
 exported = False
 
-# Method 1: standard glTF export
+# Enable glTF addon (may be disabled by default in Blender 5.x)
+try:
+    bpy.ops.preferences.addon_enable(module='io_scene_gltf2')
+    print("[BL] glTF addon enabled")
+except Exception as ex:
+    print(f"[BL] addon enable: {ex}")
+
+# List available export operators for debugging
+ops = [str(o) for o in dir(bpy.ops) if 'export' in o.lower() or 'gltf' in o.lower()]
+if ops:
+    print(f"[BL] export ops: {ops}")
+
+# Method 1: standard
 try:
     bpy.ops.export_scene.gltf(filepath=out_path, export_format='GLB')
     if os.path.exists(out_path) and os.path.getsize(out_path) > 50:
         exported = True
         print(f"[BL] export method 1 OK")
 except Exception as e1:
-    print(f"[BL] method 1 failed: {e1}")
+    print(f"[BL] method 1: {e1}")
 
-# Method 2: without export_format
+# Method 2: no format param
 if not exported:
     try:
         bpy.ops.export_scene.gltf(filepath=out_path)
-        if os.path.exists(out_path) and os.path.getsize(out_path) > 50:
+        if os.path.exists(out_path):
             exported = True
             print(f"[BL] export method 2 OK")
     except Exception as e2:
-        print(f"[BL] method 2 failed: {e2}")
+        print(f"[BL] method 2: {e2}")
 
-# Method 3: GLTF_SEPARATE then rename
+# Method 3: GLTF_SEPARATE
 if not exported:
     try:
         sep_path = out_path.replace('.glb', '.gltf')
         bpy.ops.export_scene.gltf(filepath=sep_path, export_format='GLTF_SEPARATE')
-        if os.path.exists(sep_path) and os.path.getsize(sep_path) > 50:
+        if os.path.exists(sep_path):
             os.rename(sep_path, out_path)
             exported = True
-            print(f"[BL] export method 3 OK (GLTF_SEPARATE)")
+            print(f"[BL] export method 3 OK")
     except Exception as e3:
-        print(f"[BL] method 3 failed: {e3}")
+        print(f"[BL] method 3: {e3}")
+
+# Method 4: wm.gltf_export (newer API)
+if not exported:
+    try:
+        bpy.ops.wm.gltf_export(filepath=out_path)
+        if os.path.exists(out_path):
+            exported = True
+            print(f"[BL] export method 4 OK")
+    except Exception as e4:
+        print(f"[BL] method 4: {e4}")
 
 if not exported:
     raise RuntimeError("All export methods failed")`,
@@ -448,10 +469,18 @@ function buildScript(userScript, outFile, fmt, quality = 'standard') {
   return `
 import bpy, sys, os, traceback
 
+# ── Debug ──
 print(f"[BL] blender={bpy.app.version_string}")
 print(f"[BL] python={sys.version}")
+print(f"[BL] cwd={os.getcwd()}")
 
-# 1. Clear default scene
+# Enable common export addons
+for mod in ['io_scene_gltf2', 'io_scene_fbx', 'io_mesh_stl']:
+    try:
+        bpy.ops.preferences.addon_enable(module=mod)
+    except: pass
+
+# ── Clear default scene ──
 try:
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False, confirm=False)
@@ -683,7 +712,18 @@ async function testBlenderExport() {
 
   const code = `
 import bpy, os, sys
-sys.stdout = sys.stderr
+
+print(f"BLENDER={bpy.app.version_string}")
+
+# Enable addon
+try:
+    bpy.ops.preferences.addon_enable(module='io_scene_gltf2')
+except: pass
+
+# List export ops
+ops = [o for o in dir(bpy.ops) if 'export' in o.lower() or 'gltf' in o.lower()]
+print(f"EXPORT_OPS={ops}")
+
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False, confirm=False)
 bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
@@ -692,9 +732,13 @@ out_f = '${testFile}'
 os.makedirs(os.path.dirname(out_f), exist_ok=True)
 try:
     bpy.ops.export_scene.gltf(filepath=out_f, export_format='GLB')
-    print(f"TEST_EXPORT_OK size={os.path.getsize(out_f)}")
+    sz = os.path.getsize(out_f)
+    print(f"TEST_EXPORT_OK size={sz}")
+    if sz < 50:
+        print(f"TEST_EXPORT_TOO_SMALL={sz}")
+        sys.exit(1)
 except Exception as e:
-    print(f"TEST_EXPORT_FAIL: {e}")
+    print(f"TEST_EXPORT_FAIL={e}")
     sys.exit(1)
 `;
 
