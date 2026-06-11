@@ -405,94 +405,74 @@ print("[BL] Cinematic post-pass complete ✅")
 
 function buildScript(userScript, outFile, fmt, quality = 'standard') {
   const indented = String(userScript || '').split('\n').map(l => `    ${l}`).join('\n');
-  const preamble = QUALITY_PREAMBLE[quality] || QUALITY_PREAMBLE.standard;
-  const postpass = QUALITY_POSTPASS[quality] || QUALITY_POSTPASS.standard;
   const outDir = path.dirname(outFile);
-  const previewPath = path.join(outDir, 'preview.png');
+  const exportCmd = EXPORT_CMD[fmt](outFile);
 
+  // Ultra-minimal script — avoids ALL Blender 5.1 API pitfalls:
+  // No HDRI, no compositor, no camera rigging, no PBR postpass, no preview render.
+  // Just: clear scene → run user code → fallback cube → export.
   return `
 import bpy, sys, os, traceback
 
-print("[BL] Starting...")
+print("[BL] START")
 sys.stdout.flush()
 
-# Clear default scene
+# 1. Clear default scene
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False, confirm=False)
-print("[BL] Scene cleared")
-sys.stdout.flush()
 
-${preamble}
-
-# User script
-print("[BL] Running user script...")
+# 2. Run user script
+print("[BL] USER_SCRIPT")
 sys.stdout.flush()
 try:
 ${indented}
-    print("[BL] User script completed")
+    print("[BL] USER_OK")
 except Exception as e:
-    traceback.print_exc(file=sys.stderr)
-    print(f"USER_SCRIPT_ERROR: {str(e)}", file=sys.stderr)
-    sys.stderr.flush()
+    traceback.print_exc()
+    print(f"USER_ERROR: {e}")
     sys.exit(1)
 sys.stdout.flush()
 
-${postpass}
+# 3. Collect mesh objects (skip shadow catcher / internals)
+meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.name.startswith('_')]
+print(f"[BL] MESHES={len(meshes)}")
 sys.stdout.flush()
 
-# Verify we have mesh objects to export
-mesh_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and not obj.name.startswith('_')]
-print(f"[BL] Found {len(mesh_objects)} mesh object(s)")
-sys.stdout.flush()
-
-if not mesh_objects:
-    print("[BL] No mesh objects found — creating fallback cube")
+# 4. Fallback if user created nothing
+if not meshes:
+    print("[BL] FALLBACK")
     bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
-    cube = bpy.context.active_object
-    cube.name = "FallbackCube"
+    bpy.context.active_object.name = "BL_Fallback"
+    meshes = [bpy.context.active_object]
+
+# 5. Smooth shading
+for o in meshes:
+    bpy.context.view_layer.objects.active = o
     bpy.ops.object.shade_smooth()
-    mesh_objects = [cube]
-    print("[BL] Fallback cube created")
-    sys.stdout.flush()
 
-# Render preview PNG
-quality_str = '${quality}'
-if quality_str != 'draft':
-    bpy.context.scene.render.resolution_x = 1200
-    bpy.context.scene.render.resolution_y = 800
-    bpy.context.scene.render.filepath = '${previewPath}'
-    try:
-        bpy.ops.render.render(write_still=True)
-        print("[BL] Preview PNG rendered")
-    except Exception as e:
-        print(f"[BL] Preview render skipped: {e}")
-    sys.stdout.flush()
-
-# Export
+# 6. Export
 out_file = '${outFile}'
-os.makedirs(os.path.dirname(out_file), exist_ok=True)
-print(f"[BL] Exporting to: {out_file}")
+os.makedirs('${outDir}', exist_ok=True)
+print(f"[BL] EXPORT {out_file}")
+sys.stdout.flush()
+try:
+    ${exportCmd}
+    print("[BL] EXPORT_OK")
+except Exception as e:
+    print(f"EXPORT_ERR: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 sys.stdout.flush()
 
-try:
-    ${EXPORT_CMD[fmt](outFile)}
-    print(f"[BL] Export completed: ${fmt}")
-    sys.stdout.flush()
-except Exception as e:
-    print(f"EXPORT_ERROR: {e}", file=sys.stderr)
-    traceback.print_exc(file=sys.stderr)
-    sys.stderr.flush()
+# 7. Verify
+if os.path.exists(out_file):
+    print(f"[BL] SIZE={os.path.getsize(out_file)}")
+else:
+    print(f"FATAL: no output at {out_file}")
     sys.exit(1)
 
-# Verify file exists
-if os.path.exists(out_file):
-    size = os.path.getsize(out_file)
-    print(f"[BL] Output file size: {size} bytes")
-    sys.stdout.flush()
-else:
-    print(f"FATAL: Output file not created at {out_file}", file=sys.stderr)
-    sys.stderr.flush()
-    sys.exit(1)
+print("[BL] DONE")
+sys.stdout.flush()
 `;
 }
 
@@ -502,15 +482,16 @@ async function runBlenderScript(scriptPath, fmt) {
   
   try {
     const output = execSync(cmd, opts);
-    console.log(`[BL ${fmt}] Output:\n${output.slice(-2000)}`);
+    console.log(`--- Blender ${fmt} STDOUT ---\n${output.slice(-3000)}\n--- END ---`);
     return { success: true, output };
   } catch (e) {
-    const stdout = e.stdout || '';
-    const stderr = e.stderr || '';
-    const msg = e.message || '';
-    console.log(`[BL ${fmt}] EXIT CODE: ${e.status}`);
-    console.log(`[BL ${fmt}] STDERR:\n${(stderr || stdout).slice(-2000)}`);
-    return { success: false, output: stdout, error: (stderr || stdout).slice(-500) };
+    const out = e.stdout || '';
+    const err = e.stderr || '';
+    console.log(`--- Blender ${fmt} FAIL (code=${e.status}) ---`);
+    console.log(`STDOUT:\n${out.slice(-2000)}`);
+    if (err) console.log(`STDERR:\n${err.slice(-2000)}`);
+    console.log(`--- END ---`);
+    return { success: false, output: out, error: (err || out).slice(-500) };
   }
 }
 
@@ -650,6 +631,44 @@ async function processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, hea
   return true;
 }
 
+async function testBlenderExport() {
+  const testDir = `/tmp/bl_test_${Date.now()}`;
+  fs.mkdirSync(testDir, { recursive: true });
+  const testFile = path.join(testDir, 'test.glb');
+  const testScript = path.join(testDir, 'test.py');
+
+  const code = `
+import bpy, os, sys
+sys.stdout = sys.stderr
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete(use_global=False, confirm=False)
+bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
+bpy.context.active_object.name = "TestCube"
+out_f = '${testFile}'
+os.makedirs(os.path.dirname(out_f), exist_ok=True)
+try:
+    bpy.ops.export_scene.gltf(filepath=out_f, export_format='GLB')
+    print(f"TEST_EXPORT_OK size={os.path.getsize(out_f)}")
+except Exception as e:
+    print(f"TEST_EXPORT_FAIL: {e}")
+    sys.exit(1)
+`;
+
+  fs.writeFileSync(testScript, code);
+  try {
+    execSync(`blender --background --python ${testScript} 2>&1`, { encoding: 'utf-8', timeout: 60000 });
+    const size = fs.statSync(testFile).size;
+    console.log(`✅ Pre-flight test: GLB export works (${size} bytes)`);
+    fs.rmSync(testDir, { recursive: true, force: true });
+    return true;
+  } catch (e) {
+    const out = e.stdout || '';
+    console.error(`❌ Pre-flight test FAILED:\n${out.slice(-1000)}`);
+    fs.rmSync(testDir, { recursive: true, force: true });
+    return false;
+  }
+}
+
 async function main() {
   const runnerRef = db.collection('system').doc('runner');
   const now = Date.now();
@@ -676,12 +695,10 @@ async function main() {
     process.exit(1);
   }
 
-  // Verify HDRI assets
-  const hdrPath = path.join(__dirname, 'assets', 'studio_small_03_1k.hdr');
-  if (fs.existsSync(hdrPath)) {
-    console.log(`✅ HDRI asset found: ${hdrPath}`);
-  } else {
-    console.warn(`⚠️ HDRI not found, will use fallback lighting`);
+  // Pre-flight test — make sure GLB export actually works
+  const exportOk = await testBlenderExport();
+  if (!exportOk) {
+    console.error('❌ Pre-flight export test failed — will still attempt jobs but expect failures');
   }
 
   // Mark runner as ready — can now accept jobs
