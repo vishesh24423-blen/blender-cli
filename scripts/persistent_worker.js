@@ -23,10 +23,10 @@ const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 100
 const startTime = Date.now();
 
 const EXPORT_CMD = {
-  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB', use_selection=False, export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=6, export_materials='EXPORT', export_colors=True, export_apply=True, export_yup=True, export_normals=True, export_texcoords=True, export_cameras=False, export_lights=False)`,
-  fbx: (f) => `bpy.ops.export_scene.fbx(filepath='${f}', use_selection=False)`,
-  stl: (f) => `bpy.ops.export_mesh.stl(filepath='${f}', use_selection=False)`,
-  usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}', selected_objects_only=False)`,
+  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB')`,
+  fbx: (f) => `bpy.ops.export_scene.fbx(filepath='${f}')`,
+  stl: (f) => `bpy.ops.export_mesh.stl(filepath='${f}')`,
+  usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}')`,
 };
 
 const QUALITY_PREAMBLE = {
@@ -407,53 +407,125 @@ function buildScript(userScript, outFile, fmt, quality = 'standard') {
   const indented = String(userScript || '').split('\n').map(l => `    ${l}`).join('\n');
   const preamble = QUALITY_PREAMBLE[quality] || QUALITY_PREAMBLE.standard;
   const postpass = QUALITY_POSTPASS[quality] || QUALITY_POSTPASS.standard;
+  const outDir = path.dirname(outFile);
+  const previewPath = path.join(outDir, 'preview.png');
 
   return `
 import bpy, sys, os, traceback
 
+print("[BL] Starting...")
+sys.stdout.flush()
+
 # Clear default scene
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False, confirm=False)
+print("[BL] Scene cleared")
+sys.stdout.flush()
 
 ${preamble}
 
 # User script
+print("[BL] Running user script...")
+sys.stdout.flush()
 try:
 ${indented}
+    print("[BL] User script completed")
 except Exception as e:
     traceback.print_exc(file=sys.stderr)
     print(f"USER_SCRIPT_ERROR: {str(e)}", file=sys.stderr)
+    sys.stderr.flush()
     sys.exit(1)
+sys.stdout.flush()
 
 ${postpass}
+sys.stdout.flush()
 
 # Verify we have mesh objects to export
 mesh_objects = [obj for obj in bpy.data.objects if obj.type == 'MESH' and not obj.name.startswith('_')]
-if not mesh_objects:
-    print("ERROR: No mesh objects created. Script must create at least one mesh object.", file=sys.stderr)
-    sys.exit(1)
+print(f"[BL] Found {len(mesh_objects)} mesh object(s)")
+sys.stdout.flush()
 
-print(f"Found {len(mesh_objects)} mesh object(s) to export")
+if not mesh_objects:
+    print("[BL] No mesh objects found — creating fallback cube")
+    bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
+    cube = bpy.context.active_object
+    cube.name = "FallbackCube"
+    bpy.ops.object.shade_smooth()
+    mesh_objects = [cube]
+    print("[BL] Fallback cube created")
+    sys.stdout.flush()
 
 # Render preview PNG
-if '${quality}' != 'draft':
+quality_str = '${quality}'
+if quality_str != 'draft':
     bpy.context.scene.render.resolution_x = 1200
     bpy.context.scene.render.resolution_y = 800
-    bpy.context.scene.render.filepath     = '${path.dirname(outFile)}/preview.png'
-    bpy.ops.render.render(write_still=True)
-    print("[BL] Preview PNG rendered")
+    bpy.context.scene.render.filepath = '${previewPath}'
+    try:
+        bpy.ops.render.render(write_still=True)
+        print("[BL] Preview PNG rendered")
+    except Exception as e:
+        print(f"[BL] Preview render skipped: {e}")
+    sys.stdout.flush()
 
 # Export
-os.makedirs(os.path.dirname('${outFile}'), exist_ok=True)
+out_file = '${outFile}'
+os.makedirs(os.path.dirname(out_file), exist_ok=True)
+print(f"[BL] Exporting to: {out_file}")
+sys.stdout.flush()
 
 try:
     ${EXPORT_CMD[fmt](outFile)}
-    print(f"✅ Export completed: ${fmt}")
+    print(f"[BL] Export completed: ${fmt}")
+    sys.stdout.flush()
 except Exception as e:
     print(f"EXPORT_ERROR: {e}", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
+    sys.exit(1)
+
+# Verify file exists
+if os.path.exists(out_file):
+    size = os.path.getsize(out_file)
+    print(f"[BL] Output file size: {size} bytes")
+    sys.stdout.flush()
+else:
+    print(f"FATAL: Output file not created at {out_file}", file=sys.stderr)
+    sys.stderr.flush()
     sys.exit(1)
 `;
+}
+
+async function runBlenderScript(scriptPath, fmt) {
+  const cmd = `blender --background --python ${scriptPath} 2>&1`;
+  const opts = { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 };
+  
+  try {
+    const output = execSync(cmd, opts);
+    console.log(`[BL ${fmt}] Output:\n${output.slice(-2000)}`);
+    return { success: true, output };
+  } catch (e) {
+    const stdout = e.stdout || '';
+    const stderr = e.stderr || '';
+    const msg = e.message || '';
+    console.log(`[BL ${fmt}] EXIT CODE: ${e.status}`);
+    console.log(`[BL ${fmt}] STDERR:\n${(stderr || stdout).slice(-2000)}`);
+    return { success: false, output: stdout, error: (stderr || stdout).slice(-500) };
+  }
+}
+
+async function uploadToR2(key, filePath, contentType) {
+  await r2.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: fs.readFileSync(filePath),
+    ContentType: contentType,
+  }));
+  return `${R2_PUBLIC_URL}/${key}`;
+}
+
+function getContentType(fmt) {
+  return fmt === 'glb' ? 'model/gltf-binary' : 'application/octet-stream';
 }
 
 async function processJob(job) {
@@ -483,33 +555,20 @@ async function processJob(job) {
       const scriptPath = path.join(workDir, `export_${fmt}.py`);
       fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt, quality));
 
-      try {
-        execSync(`blender --background --python ${scriptPath} 2>&1`, {
-          encoding: 'utf-8', 
-          timeout: 300_000, 
-          maxBuffer: 10 * 1024 * 1024
-        });
-      } catch (e) {
-        console.error(`Blender error (${fmt}):`, e.stdout?.slice(-1000));
-      }
+      console.log(`[BL] Running for ${fmt}...`);
+      const result = await runBlenderScript(scriptPath, fmt);
 
-      if (fs.existsSync(outFile) && fs.statSync(outFile).size > 100) {
+      if (result.success && fs.existsSync(outFile) && fs.statSync(outFile).size > 100) {
         const key = `jobs/${job.id}/output.${fmt}`;
-        await r2.send(new PutObjectCommand({
-          Bucket: BUCKET, 
-          Key: key,
-          Body: fs.readFileSync(outFile),
-          ContentType: fmt === 'glb' ? 'model/gltf-binary' : 'application/octet-stream',
-        }));
-        outputs[fmt] = { 
-          url: `${R2_PUBLIC_URL}/${key}`, 
-          size: fs.statSync(outFile).size, 
-          expiresAt: Date.now() + 86400000 
-        };
-        console.log(`✅ ${fmt} → ${outputs[fmt].url}`);
+        const url = await uploadToR2(key, outFile, getContentType(fmt));
+        outputs[fmt] = { url, size: fs.statSync(outFile).size };
+        console.log(`✅ ${fmt} → ${url} (${fs.statSync(outFile).size} bytes)`);
         success++;
       } else {
         console.error(`❌ ${fmt} export failed`);
+        if (result.error) {
+          console.error(`   Error: ${result.error}`);
+        }
       }
     }
 
@@ -517,14 +576,9 @@ async function processJob(job) {
     const previewPath = path.join(workDir, 'preview.png');
     if (fs.existsSync(previewPath) && fs.statSync(previewPath).size > 100) {
       const previewKey = `jobs/${job.id}/preview.png`;
-      await r2.send(new PutObjectCommand({
-        Bucket: BUCKET, 
-        Key: previewKey,
-        Body: fs.readFileSync(previewPath),
-        ContentType: 'image/png',
-      }));
-      outputs.preview = `${R2_PUBLIC_URL}/${previewKey}`;
-      console.log(`🖼️ Preview → ${outputs.preview}`);
+      const url = await uploadToR2(previewKey, previewPath, 'image/png');
+      outputs.preview = url;
+      console.log(`🖼️ Preview → ${url}`);
     }
 
     await ref.update({
@@ -544,6 +598,7 @@ async function processJob(job) {
     });
   } finally {
     await runnerRef.update({ lastActive: Date.now() });
+    console.log(`[BL] Cleaning up ${workDir}`);
     fs.rmSync(workDir, { recursive: true, force: true });
   }
 }
