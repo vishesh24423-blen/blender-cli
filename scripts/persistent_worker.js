@@ -23,7 +23,44 @@ const WINDOW_MS = (parseInt(process.env.WINDOW_MINUTES || '350') - 5) * 60 * 100
 const startTime = Date.now();
 
 const EXPORT_CMD = {
-  glb: (f) => `bpy.ops.export_scene.gltf(filepath='${f}', export_format='GLB')`,
+  glb: (f) => `
+# Try multiple export methods for Blender 5.x compatibility
+out_path = '${f}'
+exported = False
+
+# Method 1: standard glTF export
+try:
+    bpy.ops.export_scene.gltf(filepath=out_path, export_format='GLB')
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 50:
+        exported = True
+        print(f"[BL] export method 1 OK")
+except Exception as e1:
+    print(f"[BL] method 1 failed: {e1}")
+
+# Method 2: without export_format
+if not exported:
+    try:
+        bpy.ops.export_scene.gltf(filepath=out_path)
+        if os.path.exists(out_path) and os.path.getsize(out_path) > 50:
+            exported = True
+            print(f"[BL] export method 2 OK")
+    except Exception as e2:
+        print(f"[BL] method 2 failed: {e2}")
+
+# Method 3: GLTF_SEPARATE then rename
+if not exported:
+    try:
+        sep_path = out_path.replace('.glb', '.gltf')
+        bpy.ops.export_scene.gltf(filepath=sep_path, export_format='GLTF_SEPARATE')
+        if os.path.exists(sep_path) and os.path.getsize(sep_path) > 50:
+            os.rename(sep_path, out_path)
+            exported = True
+            print(f"[BL] export method 3 OK (GLTF_SEPARATE)")
+    except Exception as e3:
+        print(f"[BL] method 3 failed: {e3}")
+
+if not exported:
+    raise RuntimeError("All export methods failed")`,
   fbx: (f) => `bpy.ops.export_scene.fbx(filepath='${f}')`,
   stl: (f) => `bpy.ops.export_mesh.stl(filepath='${f}')`,
   usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}')`,
@@ -408,18 +445,18 @@ function buildScript(userScript, outFile, fmt, quality = 'standard') {
   const outDir = path.dirname(outFile);
   const exportCmd = EXPORT_CMD[fmt](outFile);
 
-  // Ultra-minimal script — avoids ALL Blender 5.1 API pitfalls:
-  // No HDRI, no compositor, no camera rigging, no PBR postpass, no preview render.
-  // Just: clear scene → run user code → fallback cube → export.
   return `
 import bpy, sys, os, traceback
 
-print("[BL] START")
-sys.stdout.flush()
+print(f"[BL] blender={bpy.app.version_string}")
+print(f"[BL] python={sys.version}")
 
 # 1. Clear default scene
-bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete(use_global=False, confirm=False)
+try:
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete(use_global=False, confirm=False)
+except Exception as e:
+    print(f"[BL] clear warn: {e}")
 
 # 2. Run user script
 print("[BL] USER_SCRIPT")
@@ -433,7 +470,7 @@ except Exception as e:
     sys.exit(1)
 sys.stdout.flush()
 
-# 3. Collect mesh objects (skip shadow catcher / internals)
+# 3. Collect mesh objects
 meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.name.startswith('_')]
 print(f"[BL] MESHES={len(meshes)}")
 sys.stdout.flush()
@@ -441,14 +478,21 @@ sys.stdout.flush()
 # 4. Fallback if user created nothing
 if not meshes:
     print("[BL] FALLBACK")
-    bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
-    bpy.context.active_object.name = "BL_Fallback"
-    meshes = [bpy.context.active_object]
+    try:
+        bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
+        bpy.context.active_object.name = "BL_Fallback"
+        meshes = [bpy.context.active_object]
+    except Exception as e:
+        print(f"FALLBACK_ERROR: {e}")
+        sys.exit(1)
 
 # 5. Smooth shading
 for o in meshes:
-    bpy.context.view_layer.objects.active = o
-    bpy.ops.object.shade_smooth()
+    try:
+        bpy.context.view_layer.objects.active = o
+        bpy.ops.object.shade_smooth()
+    except:
+        pass
 
 # 6. Export
 out_file = '${outFile}'
@@ -457,18 +501,18 @@ print(f"[BL] EXPORT {out_file}")
 sys.stdout.flush()
 try:
     ${exportCmd}
-    print("[BL] EXPORT_OK")
+    print(f"[BL] VERIFY")
+    if os.path.exists(out_file):
+        sz = os.path.getsize(out_file)
+        print(f"[BL] SIZE={sz}")
+        if sz < 50:
+            print(f"[BL] WARN: file too small ({sz} bytes)")
+    else:
+        print(f"FATAL: no output at {out_file}")
+        sys.exit(1)
 except Exception as e:
-    print(f"EXPORT_ERR: {e}")
     traceback.print_exc()
-    sys.exit(1)
-sys.stdout.flush()
-
-# 7. Verify
-if os.path.exists(out_file):
-    print(f"[BL] SIZE={os.path.getsize(out_file)}")
-else:
-    print(f"FATAL: no output at {out_file}")
+    print(f"EXPORT_ERR: {e}")
     sys.exit(1)
 
 print("[BL] DONE")
@@ -477,7 +521,7 @@ sys.stdout.flush()
 }
 
 async function runBlenderScript(scriptPath, fmt) {
-  const cmd = `blender --background --python ${scriptPath} 2>&1`;
+  const cmd = `blender --background --python "${scriptPath}" 2>&1`;
   const opts = { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 };
   
   try {
@@ -656,7 +700,7 @@ except Exception as e:
 
   fs.writeFileSync(testScript, code);
   try {
-    execSync(`blender --background --python ${testScript} 2>&1`, { encoding: 'utf-8', timeout: 60000 });
+    execSync(`blender --background --python "${testScript}" 2>&1`, { encoding: 'utf-8', timeout: 60000 });
     const size = fs.statSync(testFile).size;
     console.log(`✅ Pre-flight test: GLB export works (${size} bytes)`);
     fs.rmSync(testDir, { recursive: true, force: true });
