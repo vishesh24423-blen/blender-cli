@@ -939,18 +939,313 @@ body {
 
 .guide-link:hover { background: var(--primary-dim); }
 
-/* ───────────── GUIDE PAGE ───────────── */
-.guide-page {
-  padding: clamp(32px, 5vw, 64px) 0;
-  max-width: 800px;
-  margin: 0 auto;
+/* ───────────── GITHUB RUN STATUS ───────────── */
+.gh-run-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-container);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  transition: all 0.2s;
+  border: 1px solid var(--ghost-border);
+  margin-top: 4px;
+  align-self: flex-start;
 }
 
-.guide-page h1 {
+.gh-run-link:hover { background: var(--surface-high); color: var(--text-primary); }
+
+.gh-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gh-run-error {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.gh-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.gh-dot--active { background: var(--accent-green); animation: pulse-green 1.5s infinite; }
+.gh-dot--done { background: var(--accent-green); }
+.gh-dot--pending { background: var(--accent-amber); }
+
+/* ───────────── GITHUB RUN BADGE ───────────── */
+.gh-run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-high);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  transition: all 0.2s;
+  border: 1px solid var(--ghost-border);
+}
+
+.gh-run-badge:hover { background: var(--surface-highest); color: var(--text-primary); border-color: var(--primary); }
+
+.gh-run-badge--active {
+  border-color: var(--accent-green);
+  background: var(--accent-green-dim);
+  color: var(--accent-green);
+}
+
+/* ───────────── GUIDE PAGE FULL ───────────── */
+.guide-page-root {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: clamp(24px, 4vw, 48px) clamp(16px, 4vw, 32px);
+  min-height: 100vh;
+}
+
+.guide-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.guide-header-left { }
+
+.guide-title {
   font-family: var(--font-display);
-  font-size: clamp(28px, 4vw, 36px);
+  font-size: clamp(22px, 4vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px 0;
+}
+
+.guide-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.guide-back-link {
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  background: var(--primary-dim);
+  color: var(--primary);
+  text-decoration: none;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.guide-back-link:hover { background: var(--primary-glow); }
+
+.guide-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--ghost-border);
   margin-bottom: 32px;
 }
+
+.guide-tab {
+  padding: 14px 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 400;
+  border-bottom: 2px solid transparent;
+  font-family: var(--font-display);
+  transition: all 0.2s;
+}
+
+.guide-tab:hover { color: var(--text-secondary); }
+
+.guide-tab--active {
+  color: var(--primary);
+  font-weight: 600;
+  border-bottom-color: var(--primary);
+}
+
+.guide-content { }
+
+.guide-section {
+  margin-bottom: 40px;
+}
+
+.guide-section-title {
+  font-size: 18px;
+  margin-bottom: 14px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.guide-section-title--danger { color: var(--accent-red); }
+.guide-section-title--success { color: var(--accent-green); }
+
+.guide-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.guide-card {
+  padding: 18px;
+  background: var(--surface-container);
+  border: 1px solid var(--ghost-border);
+  border-radius: var(--radius-lg);
+}
+
+.guide-card--danger {
+  background: var(--accent-red-dim);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.guide-card--example {
+  padding: 22px;
+}
+
+.guide-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.guide-card-title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.guide-card-reason {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: block;
+}
+
+.guide-card-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.guide-copy-btn {
+  padding: 6px 12px;
+  background: var(--primary-dim);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  color: var(--primary);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.guide-copy-btn:hover { background: var(--primary-glow); }
+
+.guide-tip {
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--accent-green);
+}
+
+.guide-tip--success {
+  background: var(--accent-green-dim);
+  border-color: var(--accent-green);
+}
+
+.guide-tip p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.guide-tips-list {
+  display: grid;
+  gap: 8px;
+}
+
+.guide-tip-item {
+  padding: 10px 14px;
+  background: var(--surface-container);
+  border: 1px solid var(--ghost-border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.guide-tip-arrow { color: var(--primary); margin-right: 6px; }
+
+.guide-examples-intro {
+  color: var(--text-muted);
+  margin-bottom: 32px;
+  font-size: 14px;
+}
+
+.guide-cta-section {
+  margin-top: 40px;
+  padding: 24px;
+  background: var(--accent-blue-dim);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.guide-cta-section h3 {
+  margin: 0 0 8px 0;
+  color: var(--accent-blue);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.guide-cta-section p {
+  margin: 0 0 16px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.guide-cta-button {
+  display: inline-block;
+  padding: 10px 20px;
+  background: var(--accent-blue);
+  color: white;
+  text-decoration: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.guide-cta-button:hover { opacity: 0.9; }
+
+/* ───────────── GLOBAL UTILITIES ───────────── */
+.capitalize { text-transform: capitalize; }
+.text-base { font-size: 16px; }
+.text-sm { font-size: 14px; }
+.font-medium { font-weight: 500; }
+.max-w-sm { max-width: 24rem; }
+.gap-3 { gap: 12px; }
 
 /* ───────────── RESPONSIVE ───────────── */
 @media (max-width: 600px) {

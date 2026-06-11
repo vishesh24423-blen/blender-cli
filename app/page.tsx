@@ -17,7 +17,7 @@ const FEATURES = [
   {
     icon: Download,
     title: 'Download & View',
-    desc: 'Get your 3D models in GLB, FBX, STL, OBJ, or USD. Interactive 3D viewer lets you inspect results right in the browser.',
+    desc: 'Get your 3D models in GLB, FBX, STL, or USD. Interactive 3D viewer lets you inspect results right in the browser.',
   },
 ];
 
@@ -41,7 +41,6 @@ export default function HomePage() {
           PBR materials, and cinematic post-processing.
         </p>
 
-        {/* Runner Status */}
         <RunnerStatus />
       </section>
 
@@ -66,39 +65,12 @@ export default function HomePage() {
 
       {/* Guide CTA */}
       <section style={{ marginBottom: '80px', marginTop: '16px' }}>
-        <div
-          style={{
-            borderRadius: 'var(--radius-xl)',
-            background: 'var(--surface-container)',
-            padding: '36px 32px',
-            textAlign: 'center',
-            maxWidth: '600px',
-            margin: '0 auto',
-          }}
-        >
-          <h2 style={{ margin: '0 0 8px 0', fontSize: '18px', fontFamily: 'var(--font-display)', fontWeight: 600 }}>
-            New to BlenderLab?
-          </h2>
-          <p style={{ margin: '0 0 20px 0', color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.6 }}>
+        <div className="guide-cta">
+          <h2>New to BlenderLab?</h2>
+          <p>
             Learn the golden rules of script writing, explore examples, and master the patterns that produce stunning 3D assets.
           </p>
-          <Link
-            href="/guide"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 24px',
-              borderRadius: 'var(--radius-full)',
-              border: '1px solid var(--ghost-border)',
-              background: 'transparent',
-              color: 'var(--primary)',
-              textDecoration: 'none',
-              fontSize: '14px',
-              fontWeight: 500,
-              transition: 'all 0.2s',
-            }}
-          >
+          <Link href="/guide" className="guide-link">
             Read the Script Writing Guide →
           </Link>
         </div>

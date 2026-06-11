@@ -24,6 +24,18 @@ export interface Job {
 
 export type RunnerStatusType = 'active' | 'inactive' | 'starting' | 'ready';
 
+export interface GitHubRun {
+    id: number;
+    runNumber: number;
+    status: string;
+    conclusion: string | null;
+    htmlUrl: string;
+    createdAt: string;
+    updatedAt: string;
+    displayTitle: string;
+    actor: string | null;
+}
+
 export interface RunnerInfo {
     status: RunnerStatusType;
     nextRunAt: number;
@@ -33,4 +45,5 @@ export interface RunnerInfo {
     readyAt?: number;
     startedAt?: number;
     queueLength?: number;
+    triggeredJobId?: string;
 }

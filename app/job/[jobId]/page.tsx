@@ -8,19 +8,12 @@ import { useJob } from '@/hooks/useJob';
 import { useRunner } from '@/hooks/useRunner';
 import ThreeViewer from '@/components/ThreeViewer';
 import Link from 'next/link';
-import { ArrowLeft, AlertTriangle, Clock, CheckCircle, Download, Sparkles, RefreshCw } from 'lucide-react';
-import type { RunnerInfo } from '@/lib/types';
+import { ArrowLeft, AlertTriangle, Clock, CheckCircle, Download, Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
+import type { RunnerInfo, GitHubRun } from '@/lib/types';
 
-const STATUS_CONFIG: Record<string, { label: string }> = {
-    queued: { label: 'QUEUED' },
-    processing: { label: 'PROCESSING' },
-    done: { label: 'COMPLETED' },
-    failed: { label: 'FAILED' },
-};
+const RUNNER_WAKE_TIMEOUT = 120_000;
 
-const RUNNER_WAKE_TIMEOUT = 120_000; // 2 minutes before showing error
-
-function RunnerWakingState() {
+function RunnerWakingState({ ghRun }: { ghRun?: GitHubRun }) {
     return (
         <div className="status-card">
             <div className="status-card-center">
@@ -36,12 +29,19 @@ function RunnerWakingState() {
                 <p className="text-sm text-white/40 text-center max-w-sm">
                     A GitHub Actions runner is being started. This takes about 30-60 seconds.
                 </p>
+                {ghRun && (
+                    <a href={ghRun.htmlUrl} target="_blank" rel="noopener noreferrer" className="gh-run-badge">
+                        <span className={`gh-dot ${ghRun.status === 'queued' ? 'gh-dot--pending' : 'gh-dot--active'}`} />
+                        GitHub Actions #{ghRun.runNumber}: {ghRun.status}
+                        <ExternalLink size={12} />
+                    </a>
+                )}
             </div>
         </div>
     );
 }
 
-function RunnerStartingState() {
+function RunnerStartingState({ ghRun }: { ghRun?: GitHubRun }) {
     return (
         <div className="status-card">
             <div className="status-card-center">
@@ -50,12 +50,19 @@ function RunnerStartingState() {
                 <p className="text-sm text-white/40 text-center max-w-sm">
                     Installing Blender and initializing the environment. Almost ready.
                 </p>
+                {ghRun && (
+                    <a href={ghRun.htmlUrl} target="_blank" rel="noopener noreferrer" className="gh-run-badge">
+                        <span className="gh-dot gh-dot--active" />
+                        GitHub Actions #{ghRun.runNumber}: {ghRun.status}
+                        <ExternalLink size={12} />
+                    </a>
+                )}
             </div>
         </div>
     );
 }
 
-function QueuedState({ queuePosition, runner }: { queuePosition: number | null; runner: RunnerInfo | null }) {
+function QueuedState({ queuePosition, runner, ghRun }: { queuePosition: number | null; runner: RunnerInfo | null; ghRun?: GitHubRun }) {
     return (
         <div className="status-card">
             {queuePosition !== null && (
@@ -75,6 +82,16 @@ function QueuedState({ queuePosition, runner }: { queuePosition: number | null; 
                 </div>
             )}
 
+            {ghRun && (
+                <a href={ghRun.htmlUrl} target="_blank" rel="noopener noreferrer" className="gh-run-badge gh-run-badge--active">
+                    <span className="gh-dot gh-dot--active" />
+                    GitHub Actions #{ghRun.runNumber}
+                    {(ghRun.status === 'queued' || ghRun.status === 'pending') && ' — Queued'}
+                    {ghRun.status === 'in_progress' && ' — Running'}
+                    <ExternalLink size={12} />
+                </a>
+            )}
+
             {runner && (runner.status === 'ready' || runner.status === 'active') && (
                 <div className="banner banner--active">
                     <span className="banner-dot" />
@@ -85,7 +102,7 @@ function QueuedState({ queuePosition, runner }: { queuePosition: number | null; 
     );
 }
 
-function ProcessingState() {
+function ProcessingState({ ghRun }: { ghRun?: GitHubRun }) {
     return (
         <div className="status-card">
             <div className="status-card-center">
@@ -97,6 +114,13 @@ function ProcessingState() {
                 <div className="progress-bar">
                     <div className="progress-bar-fill" />
                 </div>
+                {ghRun && (
+                    <a href={ghRun.htmlUrl} target="_blank" rel="noopener noreferrer" className="gh-run-badge gh-run-badge--active">
+                        <span className="gh-dot gh-dot--active" />
+                        Monitor on GitHub Actions #{ghRun.runNumber}
+                        <ExternalLink size={12} />
+                    </a>
+                )}
             </div>
         </div>
     );
@@ -192,24 +216,6 @@ function RunnerTimeoutState() {
     );
 }
 
-function RunnerErrorState() {
-    return (
-        <div className="status-card">
-            <div className="status-card-center gap-3">
-                <AlertTriangle size={28} color="var(--accent-red)" />
-                <p className="text-base font-medium">Runner failed to start</p>
-                <p className="text-sm text-white/40 text-center max-w-sm">
-                    The GitHub Actions runner could not be started. Make sure the repository has Actions enabled and the required secrets are configured.
-                </p>
-                <Link href="/" className="retry-button">
-                    <ArrowLeft size={14} />
-                    Back to home
-                </Link>
-            </div>
-        </div>
-    );
-}
-
 export default function JobPage({ params }: { params: Promise<{ jobId: string }> }) {
     const { jobId } = use(params);
     const router = useRouter();
@@ -217,9 +223,25 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
     const { runner } = useRunner();
     const [queuePosition, setQueuePosition] = useState<number | null>(null);
     const [wakeTimeout, setWakeTimeout] = useState(false);
+    const [ghRuns, setGhRuns] = useState<GitHubRun[]>([]);
     const wakeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     const isQueued = job?.status === 'queued';
+
+    // Fetch GitHub Actions run status
+    useEffect(() => {
+        const fetchGhRuns = async () => {
+            try {
+                const res = await fetch('/api/github-status');
+                const data = await res.json();
+                if (data.runs) setGhRuns(data.runs);
+            } catch {}
+        };
+
+        fetchGhRuns();
+        const interval = setInterval(fetchGhRuns, 10000);
+        return () => clearInterval(interval);
+    }, []);
 
     // Queue position polling
     useEffect(() => {
@@ -272,7 +294,6 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         };
     }, [isQueued, runner?.status]);
 
-    // If runner finally becomes ready/active, clear timeout
     useEffect(() => {
         if (runner && (runner.status === 'ready' || runner.status === 'active')) {
             setWakeTimeout(false);
@@ -281,6 +302,8 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
     }, [runner?.status]);
 
     const handleRetry = () => router.push('/');
+
+    const ghRun = ghRuns[0];
 
     if (loading) {
         return (
@@ -292,26 +315,30 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
 
     if (error || !job) {
         return (
-            <div className="job-page">
-                <Link href="/" className="back-link">
-                    <ArrowLeft size={16} /> Back to home
-                </Link>
-                <div className="status-card">
-                    <div className="status-card-center gap-3">
-                        <AlertTriangle size={36} color="var(--accent-red)" />
-                        <p className="text-base font-medium">{error || 'Job not found'}</p>
-                        <Link href="/" className="retry-button">
-                            <ArrowLeft size={14} /> Go back
-                        </Link>
+            <div className="page-root">
+                <div className="page-container">
+                    <Link href="/" className="back-link">
+                        <ArrowLeft size={16} /> Back to home
+                    </Link>
+                    <div className="status-card">
+                        <div className="status-card-center gap-3">
+                            <AlertTriangle size={36} color="var(--accent-red)" />
+                            <p className="text-base font-medium">{error || 'Job not found'}</p>
+                            <Link href="/" className="retry-button">
+                                <ArrowLeft size={14} /> Go back
+                            </Link>
+                        </div>
                     </div>
                 </div>
             </div>
         );
     }
 
-    const status = STATUS_CONFIG[job.status] || STATUS_CONFIG.failed;
+    const isWaking = isQueued && (!runner || runner.status === 'inactive');
+    const isStarting = isQueued && runner?.status === 'starting';
+    const isReallyQueued = isQueued && runner && (runner.status === 'ready' || runner.status === 'active');
 
-    const getStatusBadgeClass = () => {
+    const getBadgeClasses = () => {
         switch (job.status) {
             case 'done': return 'badge badge--done';
             case 'processing': return 'badge badge--processing';
@@ -321,7 +348,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         }
     };
 
-    const getStatusDotClass = () => {
+    const getDotClasses = () => {
         switch (job.status) {
             case 'done': return 'dot dot--done';
             case 'processing': return 'dot dot--processing';
@@ -331,10 +358,6 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         }
     };
 
-    const isWaking = isQueued && (!runner || runner.status === 'inactive');
-    const isStarting = isQueued && runner?.status === 'starting';
-    const isReallyQueued = isQueued && runner && (runner.status === 'ready' || runner.status === 'active');
-
     return (
         <div className="page-root">
             <div className="page-container">
@@ -342,13 +365,15 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                     <ArrowLeft size={16} /> Back to home
                 </Link>
 
-                {/* Job Header */}
                 <div className="job-header">
                     <div className="job-header-top">
                         <h1 className="job-title">Job Status</h1>
-                        <span className={getStatusBadgeClass()}>
-                            <span className={getStatusDotClass()} />
-                            {status.label}
+                        <span className={getBadgeClasses()}>
+                            <span className={getDotClasses()} />
+                            {job.status === 'queued' && 'QUEUED'}
+                            {job.status === 'processing' && 'PROCESSING'}
+                            {job.status === 'done' && 'COMPLETED'}
+                            {job.status === 'failed' && 'FAILED'}
                         </span>
                     </div>
                     <p className="job-id">{jobId}</p>
@@ -365,15 +390,14 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                     </div>
                 </div>
 
-                {/* Status Content */}
                 {job.status === 'queued' && wakeTimeout && <RunnerTimeoutState />}
-                {job.status === 'queued' && !wakeTimeout && isWaking && <RunnerWakingState />}
-                {job.status === 'queued' && !wakeTimeout && isStarting && <RunnerStartingState />}
+                {job.status === 'queued' && !wakeTimeout && isWaking && <RunnerWakingState ghRun={ghRun} />}
+                {job.status === 'queued' && !wakeTimeout && isStarting && <RunnerStartingState ghRun={ghRun} />}
                 {job.status === 'queued' && !wakeTimeout && isReallyQueued && (
-                    <QueuedState queuePosition={queuePosition} runner={runner} />
+                    <QueuedState queuePosition={queuePosition} runner={runner} ghRun={ghRun} />
                 )}
 
-                {job.status === 'processing' && <ProcessingState />}
+                {job.status === 'processing' && <ProcessingState ghRun={ghRun} />}
                 {job.status === 'done' && <DoneState job={job} />}
                 {job.status === 'failed' && <FailedState job={job} onRetry={handleRetry} />}
 

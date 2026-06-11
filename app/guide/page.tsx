@@ -5,284 +5,163 @@ import { useState } from 'react';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
-export default function ScriptGuidePage() {
-  const [activeTab, setActiveTab] = useState<'guide' | 'examples'>('guide');
+const examples = [
+  {
+    name: 'Simple Cube',
+    description: 'Basic mesh creation with material',
+    code: `import bpy
 
-  const examples = [
-    {
-      name: 'Simple Cube',
-      description: 'Basic mesh creation with material',
-      code: `import bpy
-
-# Create cube
 bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
 cube = bpy.context.active_object
 cube.name = "SimpleCube"
 
-# Add material
 mat = bpy.data.materials.new("CubeMaterial")
 mat.use_nodes = True
 bsdf = mat.node_tree.nodes['Principled BSDF']
 bsdf.inputs['Base Color'].default_value = (0.2, 0.8, 0.3, 1.0)
 cube.data.materials.append(mat)
 
-# Smooth shading
 bpy.ops.object.shade_smooth()
+print("✅ Cube created")`,
+  },
+  {
+    name: 'Array of Objects',
+    description: 'Procedurally generate multiple objects',
+    code: `import bpy, math
 
-print(f"✅ Cube created and ready for export")`,
-    },
-    {
-      name: 'Array of Objects',
-      description: 'Procedurally generate multiple objects',
-      code: `import bpy
-import math
-
-# Create 12 spheres in a circle
 for i in range(12):
     angle = (i / 12) * math.pi * 2
     x = math.cos(angle) * 3
     y = math.sin(angle) * 3
-    
-    bpy.ops.mesh.primitive_uv_sphere_add(
-        radius=0.4,
-        location=(x, y, 0)
-    )
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.4, location=(x, y, 0))
     sphere = bpy.context.active_object
     sphere.name = f"Sphere_{i}"
     bpy.ops.object.shade_smooth()
 
-print(f"✅ Created 12 spheres in a circle")`,
-    },
-    {
-      name: 'Custom Material',
-      description: 'Procedural material with textures',
-      code: `import bpy
+print("✅ Created 12 spheres")`,
+  },
+  {
+    name: 'Custom Material',
+    description: 'Procedural material with noise texture',
+    code: `import bpy
 
-# Create base geometry
 bpy.ops.mesh.primitive_uv_sphere_add(radius=2, location=(0, 0, 0))
 sphere = bpy.context.active_object
 
-# Create detailed material
 mat = bpy.data.materials.new("ProceduralMaterial")
 mat.use_nodes = True
 nodes = mat.node_tree.nodes
 links = mat.node_tree.links
-
-# Clear default
 nodes.clear()
 
-# Create nodes
 output = nodes.new('ShaderNodeOutputMaterial')
 bsdf = nodes.new('ShaderNodeBsdfPrincipled')
 texture = nodes.new('ShaderNodeTexNoise')
 colorRamp = nodes.new('ShaderNodeValRamp')
 
-# Connect nodes
 links.new(texture.outputs['Fac'], colorRamp.inputs['Fac'])
 links.new(colorRamp.outputs['Color'], bsdf.inputs['Base Color'])
 links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
 
-# Configure
 bsdf.inputs['Roughness'].default_value = 0.3
 texture.inputs['Scale'].default_value = 5.0
 
 sphere.data.materials.append(mat)
 bpy.ops.object.shade_smooth()
+print("✅ Sphere with procedural material")`,
+  },
+  {
+    name: 'Modifier Stack',
+    description: 'Stack multiple modifiers for complex geometry',
+    code: `import bpy
 
-print(f"✅ Sphere with procedural material created")`,
-    },
-    {
-      name: 'Modifier Stack',
-      description: 'Stack multiple modifiers for complex geometry',
-      code: `import bpy
-
-# Create base cylinder
 bpy.ops.mesh.primitive_cylinder_add(
-    vertices=6,
-    radius=1,
-    depth=2,
-    location=(0, 0, 0)
+    vertices=6, radius=1, depth=2, location=(0, 0, 0)
 )
 obj = bpy.context.active_object
 obj.name = "ModifiedCylinder"
 
-# Add modifiers
-# Bevel edges
 bevel = obj.modifiers.new('Bevel', 'BEVEL')
 bevel.width = 0.1
 bevel.segments = 3
 
-# Array modifier
 array = obj.modifiers.new('Array', 'ARRAY')
 array.count = 3
-array.relative = True
 array.relative_offset_displace[0] = 2.5
 
-# Apply smooth shading last
 bpy.ops.object.shade_smooth()
+print("✅ Cylinder with modifiers")`,
+  },
+];
 
-print(f"✅ Cylinder with bevel and array modifiers created")`,
-    },
-  ];
+export default function ScriptGuidePage() {
+  const [activeTab, setActiveTab] = useState<'guide' | 'examples'>('guide');
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+
+  const handleCopy = async (code: string, idx: number) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedIdx(idx);
+      setTimeout(() => setCopiedIdx(null), 2000);
+    } catch {}
+  };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--surface)' }}>
+    <div className="guide-page-root">
       {/* Header */}
-      <header
-        style={{
-          borderBottom: '1px solid var(--ghost-border)',
-          padding: '20px 0',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 600, fontFamily: 'var(--font-display)', letterSpacing: '-0.02em' }}>
-            Script Writing Guide
-          </h1>
-          <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '14px' }}>Learn how to write scripts for BlenderLab</p>
+      <div className="guide-header">
+        <div className="guide-header-left">
+          <h1 className="guide-title">Script Writing Guide</h1>
+          <p className="guide-subtitle">Learn how to write scripts for BlenderLab</p>
         </div>
-        <Link
-          href="/"
-          style={{
-            padding: '8px 16px',
-            borderRadius: 'var(--radius-full)',
-            background: 'var(--primary-dim)',
-            color: 'var(--primary)',
-            textDecoration: 'none',
-            border: '1px solid rgba(139, 92, 246, 0.2)',
-            fontSize: '13px',
-            fontWeight: 500,
-          }}
-        >
+        <Link href="/" className="guide-back-link">
           ← Back Home
         </Link>
-      </header>
+      </div>
 
-      {/* Navigation Tabs */}
-      <div
-        style={{
-          borderBottom: '1px solid var(--ghost-border)',
-          padding: '0',
-          display: 'flex',
-          gap: '24px',
-        }}
-      >
+      {/* Tabs */}
+      <div className="guide-tabs">
         <button
           onClick={() => setActiveTab('guide')}
-          style={{
-            padding: '14px 0',
-            border: 'none',
-            background: 'none',
-            color: activeTab === 'guide' ? 'var(--primary)' : 'var(--text-muted)',
-            cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: activeTab === 'guide' ? 600 : 400,
-            borderBottom: activeTab === 'guide' ? '2px solid var(--primary)' : '2px solid transparent',
-            fontFamily: 'var(--font-display)',
-          }}
+          className={`guide-tab ${activeTab === 'guide' ? 'guide-tab--active' : ''}`}
         >
           Guide
         </button>
         <button
           onClick={() => setActiveTab('examples')}
-          style={{
-            padding: '14px 0',
-            border: 'none',
-            background: 'none',
-            color: activeTab === 'examples' ? 'var(--primary)' : 'var(--text-muted)',
-            cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: activeTab === 'examples' ? 600 : 400,
-            borderBottom: activeTab === 'examples' ? '2px solid var(--primary)' : '2px solid transparent',
-            fontFamily: 'var(--font-display)',
-          }}
+          className={`guide-tab ${activeTab === 'examples' ? 'guide-tab--active' : ''}`}
         >
           Examples ({examples.length})
         </button>
       </div>
 
       {/* Content */}
-      <div style={{ padding: '40px 0', maxWidth: '800px' }}>
+      <div className="guide-content">
         {activeTab === 'guide' && (
           <div>
             {/* Golden Rule */}
-            <section style={{ marginBottom: '40px' }}>
-              <h2 style={{ fontSize: '18px', marginBottom: '14px', color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontWeight: 600 }}>Golden Rule</h2>
-              <div
-                style={{
-                  padding: '18px 20px',
-                  background: 'var(--accent-green-dim)',
-                  border: '1px solid rgba(34, 197, 94, 0.2)',
-                  borderRadius: 'var(--radius-lg)',
-                  borderLeft: '3px solid var(--accent-green)',
-                }}
-              >
-                <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '15px', fontWeight: 500 }}>
-                  Your script should <strong>ONLY create geometry</strong>. Let BlenderLab handle everything else.
-                </p>
+            <section className="guide-section">
+              <h2 className="guide-section-title">Golden Rule</h2>
+              <div className="guide-tip guide-tip--success">
+                <p>Your script should <strong>ONLY create geometry</strong>. Let BlenderLab handle everything else.</p>
               </div>
             </section>
 
-            {/* DON'T Section */}
-            <section style={{ marginBottom: '40px' }}>
-              <h2 style={{ fontSize: '18px', marginBottom: '14px', color: 'var(--accent-red)', fontFamily: 'var(--font-display)', fontWeight: 600 }}>DON'T Include</h2>
-
-              <div style={{ display: 'grid', gap: '20px' }}>
+            {/* DON'T */}
+            <section className="guide-section">
+              <h2 className="guide-section-title guide-section-title--danger">DON'T Include</h2>
+              <div className="guide-grid">
                 {[
-                  {
-                    title: 'Scene Clearing',
-                    code: `bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete()
-for col in bpy.data.collections:
-    bpy.data.collections.remove(col)`,
-                    reason: 'Worker handles this automatically',
-                  },
-                  {
-                    title: 'Collection Setup',
-                    code: `if "Collection" not in bpy.data.collections:
-    bpy.data.collections.new("Collection")`,
-                    reason: 'Worker sets this up automatically',
-                  },
-                  {
-                    title: 'Export Code',
-                    code: `bpy.ops.export_scene.gltf(
-    filepath=export_path,
-    export_format='GLB'
-)`,
-                    reason: 'Worker handles export automatically',
-                  },
-                  {
-                    title: 'Render Settings',
-                    code: `scene.render.engine = 'CYCLES'
-scene.cycles.samples = 256`,
-                    reason: 'Optional; worker handles if needed',
-                  },
+                  { title: 'Scene Clearing', code: `bpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()`, reason: 'Worker handles this automatically' },
+                  { title: 'Export Code', code: `bpy.ops.export_scene.gltf(filepath=..., export_format='GLB')`, reason: 'Worker handles export' },
+                  { title: 'Render Settings', code: `scene.render.engine = 'CYCLES'`, reason: 'Worker sets optimal settings' },
                 ].map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '18px',
-                      background: 'var(--accent-red-dim)',
-                      border: '1px solid rgba(239, 68, 68, 0.15)',
-                      borderRadius: 'var(--radius-lg)',
-                    }}
-                  >
-                    <h3 style={{ margin: '0 0 6px 0', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      {item.title}
-                    </h3>
-                    <p style={{ margin: '0 0 10px 0', color: 'var(--text-muted)', fontSize: '12px' }}>{item.reason}</p>
-                    <SyntaxHighlighter
-                      language="python"
-                      style={atomOneDark}
-                      customStyle={{
-                        padding: '12px',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        margin: 0,
-                      }}
-                    >
+                  <div key={idx} className="guide-card guide-card--danger">
+                    <div className="guide-card-header">
+                      <span className="guide-card-title">{item.title}</span>
+                      <span className="guide-card-reason">{item.reason}</span>
+                    </div>
+                    <SyntaxHighlighter language="python" style={atomOneDark} customStyle={{ padding: '12px', borderRadius: '6px', fontSize: '12px', margin: 0 }}>
                       {item.code}
                     </SyntaxHighlighter>
                   </div>
@@ -290,63 +169,19 @@ scene.cycles.samples = 256`,
               </div>
             </section>
 
-            {/* DO Section */}
-            <section style={{ marginBottom: '40px' }}>
-              <h2 style={{ fontSize: '18px', marginBottom: '14px', color: 'var(--accent-green)', fontFamily: 'var(--font-display)', fontWeight: 600 }}>DO Include</h2>
-
-              <div style={{ display: 'grid', gap: '20px' }}>
+            {/* DO */}
+            <section className="guide-section">
+              <h2 className="guide-section-title guide-section-title--success">DO Include</h2>
+              <div className="guide-grid">
                 {[
-                  {
-                    title: 'Geometry Creation',
-                    code: `import bpy
-
-bpy.ops.mesh.primitive_cube_add(
-    size=2,
-    location=(0, 0, 0)
-)
-cube = bpy.context.active_object`,
-                  },
-                  {
-                    title: 'Materials',
-                    code: `mat = bpy.data.materials.new("MyMaterial")
-mat.use_nodes = True
-bsdf = mat.node_tree.nodes['Principled BSDF']
-bsdf.inputs['Base Color'].default_value = (0.2, 0.8, 0.3, 1.0)
-cube.data.materials.append(mat)`,
-                  },
-                  {
-                    title: 'Modifiers',
-                    code: `bevel = cube.modifiers.new("Bevel", 'BEVEL')
-bevel.width = 0.1
-bevel.segments = 3`,
-                  },
-                  {
-                    title: 'Smooth Shading',
-                    code: `bpy.ops.object.shade_smooth()`,
-                  },
+                  { title: 'Geometry Creation', code: `bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))` },
+                  { title: 'Materials', code: `mat = bpy.data.materials.new("MyMaterial")\nmat.use_nodes = True` },
+                  { title: 'Modifiers', code: `bevel = cube.modifiers.new("Bevel", 'BEVEL')\nbevel.width = 0.1` },
+                  { title: 'Smooth Shading', code: `bpy.ops.object.shade_smooth()` },
                 ].map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '18px',
-                      background: 'var(--surface-container)',
-                      border: '1px solid var(--ghost-border)',
-                      borderRadius: 'var(--radius-lg)',
-                    }}
-                  >
-                    <h3 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      {item.title}
-                    </h3>
-                    <SyntaxHighlighter
-                      language="python"
-                      style={atomOneDark}
-                      customStyle={{
-                        padding: '12px',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        margin: 0,
-                      }}
-                    >
+                  <div key={idx} className="guide-card">
+                    <h3 className="guide-card-title">{item.title}</h3>
+                    <SyntaxHighlighter language="python" style={atomOneDark} customStyle={{ padding: '12px', borderRadius: '6px', fontSize: '12px', margin: 0 }}>
                       {item.code}
                     </SyntaxHighlighter>
                   </div>
@@ -354,37 +189,19 @@ bevel.segments = 3`,
               </div>
             </section>
 
-            {/* Tips */}
-            <section>
-              <h2 style={{ fontSize: '18px', marginBottom: '14px', color: 'var(--text-primary)', fontFamily: 'var(--font-display)', fontWeight: 600 }}>Pro Tips</h2>
-
-              <div style={{ display: 'grid', gap: '10px' }}>
+            {/* Pro Tips */}
+            <section className="guide-section">
+              <h2 className="guide-section-title">Pro Tips</h2>
+              <div className="guide-tips-list">
                 {[
-                  'Always use descriptive object names (cube.name = "MyObject")',
-                  'Call bpy.ops.object.shade_smooth() on mesh objects for better quality',
-                  'Use materials to add color and realism to your models',
-                  'SELECT ALL MESH OBJECTS AT THE END — This is critical for BlenderLab to export them!',
-                  'Test your script locally in Blender before submitting to BlenderLab',
-                  'Use print() statements to debug and understand what your script is doing',
-                  'Create multiple objects if needed — BlenderLab will export all of them',
+                  'Use descriptive object names (cube.name = "MyObject")',
+                  'Call bpy.ops.object.shade_smooth() on mesh objects',
+                  'Use materials to add color and realism',
+                  'Test your script locally before submitting',
+                  'Use print() statements for debugging',
                 ].map((tip, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '10px 14px',
-                      background: tip.includes('SELECT ALL MESH')
-                        ? 'var(--accent-red-dim)'
-                        : 'var(--surface-container)',
-                      border: tip.includes('SELECT ALL MESH')
-                        ? '1px solid rgba(239, 68, 68, 0.2)'
-                        : '1px solid var(--ghost-border)',
-                      borderRadius: 'var(--radius)',
-                      fontSize: '13px',
-                      color: tip.includes('SELECT ALL MESH') ? 'var(--accent-red)' : 'var(--text-secondary)',
-                      fontWeight: tip.includes('SELECT ALL MESH') ? 600 : 400,
-                    }}
-                  >
-                    {tip.includes('SELECT ALL MESH') ? '⚠️ ' : '→ '}{tip}
+                  <div key={idx} className="guide-tip-item">
+                    <span className="guide-tip-arrow">→</span> {tip}
                   </div>
                 ))}
               </div>
@@ -394,93 +211,36 @@ bevel.segments = 3`,
 
         {activeTab === 'examples' && (
           <div>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '32px', fontSize: '14px' }}>
+            <p className="guide-examples-intro">
               Ready-to-use script examples. Copy and paste these into the script editor to get started!
             </p>
-
-            <div style={{ display: 'grid', gap: '24px' }}>
+            <div className="guide-grid">
               {examples.map((example, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: '22px',
-                    background: 'var(--surface-container)',
-                    border: '1px solid var(--ghost-border)',
-                    borderRadius: 'var(--radius-lg)',
-                  }}
-                >
-                  <div style={{ marginBottom: '14px' }}>
-                    <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: 600, fontFamily: 'var(--font-display)' }}>{example.name}</h3>
-                    <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted)' }}>{example.description}</p>
+                <div key={idx} className="guide-card guide-card--example">
+                  <div className="guide-card-header">
+                    <div>
+                      <h3 className="guide-card-title">{example.name}</h3>
+                      <p className="guide-card-desc">{example.description}</p>
+                    </div>
+                    <button
+                      onClick={() => handleCopy(example.code, idx)}
+                      className="guide-copy-btn"
+                    >
+                      {copiedIdx === idx ? 'Copied!' : 'Copy'}
+                    </button>
                   </div>
-
-                  <SyntaxHighlighter
-                    language="python"
-                    style={atomOneDark}
-                    customStyle={{
-                      padding: '16px',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      lineHeight: '1.5',
-                    }}
-                  >
+                  <SyntaxHighlighter language="python" style={atomOneDark} customStyle={{ padding: '16px', borderRadius: '6px', fontSize: '12px', lineHeight: '1.5' }}>
                     {example.code}
                   </SyntaxHighlighter>
-
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(example.code);
-                      alert('Copied to clipboard!');
-                    }}
-                    style={{
-                      marginTop: '12px',
-                      padding: '8px 14px',
-                      background: 'var(--primary-dim)',
-                      border: '1px solid rgba(139, 92, 246, 0.2)',
-                      color: 'var(--primary)',
-                      borderRadius: 'var(--radius)',
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                      fontWeight: 500,
-                    }}
-                  >
-                    Copy Code
-                  </button>
                 </div>
               ))}
             </div>
 
-            <div
-              style={{
-                marginTop: '40px',
-                padding: '20px',
-                background: 'rgba(59, 130, 246, 0.05)',
-                border: '1px solid rgba(59, 130, 246, 0.2)',
-                borderRadius: '8px',
-              }}
-            >
-              <h3 style={{ margin: '0 0 8px 0', color: '#3b82f6', fontSize: '14px', fontWeight: 600 }}>
-                💾 Ready to Submit?
-              </h3>
-              <p style={{ margin: 0, fontSize: '13px', color: '#888' }}>
-                Copy any example above, paste it into the script editor on the home page, select your output format,
-                and click Submit. Your 3D model will be generated in seconds!
-              </p>
-              <Link
-                href="/"
-                style={{
-                  display: 'inline-block',
-                  marginTop: '12px',
-                  padding: '10px 16px',
-                  background: '#3b82f6',
-                  color: '#fff',
-                  textDecoration: 'none',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                }}
-              >
-                Go to Home & Submit
+            <div className="guide-cta-section">
+              <h3>Ready to Submit?</h3>
+              <p>Copy any example above, paste it into the script editor, select your format, and click Generate.</p>
+              <Link href="/" className="guide-cta-button">
+                Go to Home & Submit →
               </Link>
             </div>
           </div>

@@ -1,11 +1,36 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useRunner } from '@/hooks/useRunner';
 import { useCountdown } from '@/hooks/useCountdown';
+import type { GitHubRun } from '@/lib/types';
 
 export default function RunnerStatus() {
     const { runner, loading } = useRunner();
+    const [ghRuns, setGhRuns] = useState<GitHubRun[]>([]);
+    const [ghError, setGhError] = useState(false);
     const activeCountdown = useCountdown(runner?.windowEndsAt);
+
+    useEffect(() => {
+        const fetchGhStatus = async () => {
+            try {
+                const res = await fetch('/api/github-status');
+                const data = await res.json();
+                if (data.available && data.runs) {
+                    setGhRuns(data.runs);
+                    setGhError(false);
+                } else {
+                    setGhError(true);
+                }
+            } catch {
+                setGhError(true);
+            }
+        };
+
+        fetchGhStatus();
+        const interval = setInterval(fetchGhStatus, 15000);
+        return () => clearInterval(interval);
+    }, []);
 
     if (loading) {
         return (
@@ -27,11 +52,15 @@ export default function RunnerStatus() {
         );
     }
 
+    const ghRun = ghRuns[0];
+    const isRunActive = ghRun && (ghRun.status === 'queued' || ghRun.status === 'in_progress');
+    const isRunCompleted = ghRun && ghRun.status === 'completed';
+    const isRunPending = ghRun && ghRun.status === 'pending';
+
     const isActive = runner.status === 'active';
-    const isStarting = runner.status === 'starting';
     const isReady = runner.status === 'ready';
+    const isStarting = runner.status === 'starting';
     const isInactive = runner.status === 'inactive';
-    const isOnline = isActive || isReady || isStarting;
 
     return (
         <div className={`runner-status ${
@@ -49,39 +78,52 @@ export default function RunnerStatus() {
             <div className="runner-info">
                 <div className="runner-headline">
                     {isActive && (
-                        <>
-                            <span className="runner-emoji">🟢</span>
-                            <span className="runner-label">Processing...</span>
-                            <span className="runner-desc">— running your script</span>
-                        </>
+                        <><span className="runner-emoji">🟢</span><span className="runner-label">Processing...</span></>
                     )}
                     {isReady && (
-                        <>
-                            <span className="runner-emoji">🟢</span>
-                            <span className="runner-label">Runner READY</span>
-                            <span className="runner-desc">— processing queue</span>
-                        </>
+                        <><span className="runner-emoji">🟢</span><span className="runner-label">Runner READY</span></>
                     )}
                     {isStarting && (
-                        <>
-                            <span className="runner-emoji">🟡</span>
-                            <span className="runner-label">Runner STARTING</span>
-                            <span className="runner-desc">— waking up...</span>
-                        </>
+                        <><span className="runner-emoji">🟡</span><span className="runner-label">Runner STARTING</span></>
                     )}
                     {isInactive && (
-                        <>
-                            <span className="runner-emoji">⚪</span>
-                            <span className="runner-label">Runner IDLE</span>
-                            <span className="runner-desc">— will wake on your request</span>
-                        </>
+                        <><span className="runner-emoji">⚪</span><span className="runner-label">Runner IDLE</span></>
                     )}
                 </div>
+
+                {/* GitHub Actions status */}
+                {ghRun && (
+                    <a
+                        href={ghRun.htmlUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="gh-run-link"
+                    >
+                        <span className="gh-run-status">
+                            {isRunActive && <span className="gh-dot gh-dot--active" />}
+                            {isRunCompleted && <span className="gh-dot gh-dot--done" />}
+                            {isRunPending && <span className="gh-dot gh-dot--pending" />}
+                            {ghRun.status === 'queued' && 'Queued'}
+                            {ghRun.status === 'in_progress' && 'Running'}
+                            {ghRun.status === 'completed' && ghRun.conclusion === 'success' && 'Succeeded'}
+                            {ghRun.status === 'completed' && ghRun.conclusion !== 'success' && 'Failed'}
+                            {ghRun.status === 'pending' && 'Pending'}
+                            {ghRun.status === 'waiting' && 'Waiting'}
+                            {' '}· #{ghRun.runNumber}
+                        </span>
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M2 8.5L7 5 2 1.5z"/></svg>
+                    </a>
+                )}
+
+                {ghError && (
+                    <span className="gh-run-error">GitHub status unavailable</span>
+                )}
+
                 <div className="runner-countdown">
-                    {isOnline ? (
-                        <span>Active window: <strong>{activeCountdown.formatted}</strong></span>
+                    {isInactive ? (
+                        <span>Waiting for your first request</span>
                     ) : (
-                        <span>Waiting for your first request to wake up</span>
+                        <span>Window: <strong>{activeCountdown.formatted}</strong></span>
                     )}
                 </div>
             </div>
