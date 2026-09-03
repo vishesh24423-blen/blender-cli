@@ -477,6 +477,7 @@ function buildScript(userScript, outFile, fmt, quality = 'standard') {
   const outDir = path.dirname(outFile);
   const previewFile = path.join(outDir, 'preview.png');
   const exportCmd = EXPORT_CMD[fmt](outFile);
+  const indentedExport = indentPython(exportCmd);
 
   return `
 import bpy, sys, os, traceback, math
@@ -569,7 +570,7 @@ os.makedirs('${outDir}', exist_ok=True)
 print(f"[BL] EXPORT {out_file}")
 sys.stdout.flush()
 try:
-    ${exportCmd}
+${indentedExport}
     print(f"[BL] VERIFY")
     if os.path.exists(out_file):
         sz = os.path.getsize(out_file)

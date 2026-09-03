@@ -14,16 +14,32 @@ const FORMATS: { id: OutputFormat; label: string }[] = [
 
 const SAMPLE_SCRIPT = `import bpy
 
-# Create a smooth cube with material
+# Create a smooth cube with material (Blender 5.x safe)
 bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
 cube = bpy.context.active_object
 cube.name = "MyCube"
-bpy.ops.object.shade_smooth()
 
+# Smooth shading needs an active object
+try:
+    bpy.context.view_layer.objects.active = cube
+    bpy.ops.object.shade_smooth()
+except Exception as e:
+    print(f"shade_smooth warn: {e}")
+
+# Defensive PBR material - node/socket names vary across Blender versions
 mat = bpy.data.materials.new("MyMaterial")
 mat.use_nodes = True
-bsdf = mat.node_tree.nodes['Principled BSDF']
-bsdf.inputs['Base Color'].default_value = (0.1, 0.5, 0.9, 1.0)
+nodes = mat.node_tree.nodes
+bsdf = nodes.get("Principled BSDF")
+if bsdf is None:
+    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+try:
+    if 'Base Color' in bsdf.inputs:
+        bsdf.inputs['Base Color'].default_value = (0.1, 0.5, 0.9, 1.0)
+    if 'Roughness' in bsdf.inputs:
+        bsdf.inputs['Roughness'].default_value = 0.5
+except Exception as e:
+    print(f"material warn: {e}")
 cube.data.materials.append(mat)
 `;
 
