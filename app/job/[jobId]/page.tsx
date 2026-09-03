@@ -9,7 +9,7 @@ import { useRunner } from '@/hooks/useRunner';
 import ThreeViewer from '@/components/ThreeViewer';
 import Link from 'next/link';
 import { ArrowLeft, AlertTriangle, Clock, CheckCircle, Download, Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
-import type { RunnerInfo, GitHubRun } from '@/lib/types';
+import type { RunnerInfo, GitHubRun, Job } from '@/lib/types';
 
 const RUNNER_WAKE_TIMEOUT = 120_000;
 
@@ -126,7 +126,7 @@ function ProcessingState({ ghRun }: { ghRun?: GitHubRun }) {
     );
 }
 
-function DoneState({ job }: { job: any }) {
+function DoneState({ job }: { job: Job }) {
     const viewerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -180,7 +180,7 @@ function DoneState({ job }: { job: any }) {
     );
 }
 
-function FailedState({ job, onRetry }: { job: any; onRetry: () => void }) {
+function FailedState({ job, onRetry }: { job: Job; onRetry: () => void }) {
     return (
         <div className="status-card">
             <div className="error-section">
@@ -227,6 +227,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
     const wakeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     const isQueued = job?.status === 'queued';
+    const runnerStatus = runner?.status;
 
     // Fetch GitHub Actions run status
     useEffect(() => {
@@ -243,13 +244,12 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         return () => clearInterval(interval);
     }, []);
 
-    // Queue position polling
+    // Queue position polling — state updates only inside async callbacks,
+    // never synchronously in the effect body (avoids cascading renders).
     useEffect(() => {
-        if (!isQueued) {
-            setQueuePosition(null);
-            return;
-        }
+        if (!isQueued) return;
 
+        let cancelled = false;
         const fetchPosition = async () => {
             try {
                 const q = query(
@@ -258,31 +258,36 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                     orderBy('createdAt', 'asc')
                 );
                 const snap = await getDocs(q);
+                if (cancelled) return;
                 const position = snap.docs.findIndex((d) => d.id === jobId) + 1;
                 setQueuePosition(position > 0 ? position : null);
             } catch {
-                setQueuePosition(null);
+                if (!cancelled) setQueuePosition(null);
             }
         };
 
         fetchPosition();
         const interval = setInterval(fetchPosition, 5000);
-        return () => clearInterval(interval);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
     }, [isQueued, jobId]);
 
-    // Timeout for waking state
+    // Timeout for waking state — resets are deferred via setTimeout so the
+    // effect body itself never calls setState synchronously.
     useEffect(() => {
         if (!isQueued) {
-            setWakeTimeout(false);
             if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
-            return;
+            const t = setTimeout(() => setWakeTimeout(false), 0);
+            return () => clearTimeout(t);
         }
 
-        const isWaking = !runner || runner.status === 'inactive' || runner.status === 'starting';
+        const isWaking = !runnerStatus || runnerStatus === 'inactive' || runnerStatus === 'starting';
         if (!isWaking) {
-            setWakeTimeout(false);
             if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
-            return;
+            const t = setTimeout(() => setWakeTimeout(false), 0);
+            return () => clearTimeout(t);
         }
 
         wakeTimerRef.current = setTimeout(() => {
@@ -292,14 +297,15 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         return () => {
             if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
         };
-    }, [isQueued, runner?.status]);
+    }, [isQueued, runnerStatus]);
 
     useEffect(() => {
-        if (runner && (runner.status === 'ready' || runner.status === 'active')) {
-            setWakeTimeout(false);
+        if (runnerStatus === 'ready' || runnerStatus === 'active') {
             if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+            const t = setTimeout(() => setWakeTimeout(false), 0);
+            return () => clearTimeout(t);
         }
-    }, [runner?.status]);
+    }, [runnerStatus]);
 
     const handleRetry = () => router.push('/');
 

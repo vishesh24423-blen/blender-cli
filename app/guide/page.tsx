@@ -149,7 +149,7 @@ export default function ScriptGuidePage() {
 
             {/* DON'T */}
             <section className="guide-section">
-              <h2 className="guide-section-title guide-section-title--danger">DON'T Include</h2>
+              <h2 className="guide-section-title guide-section-title--danger">DON&apos;T Include</h2>
               <div className="guide-grid">
                 {[
                   { title: 'Scene Clearing', code: `bpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()`, reason: 'Worker handles this automatically' },

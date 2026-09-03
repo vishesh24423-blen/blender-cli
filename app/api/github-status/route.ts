@@ -1,5 +1,21 @@
 import { NextResponse } from 'next/server';
 
+interface GitHubApiRun {
+    id: number;
+    run_number: number;
+    status: string;
+    conclusion: string | null;
+    html_url: string;
+    created_at: string;
+    updated_at: string;
+    display_title: string;
+    actor?: { login?: string | null } | null;
+}
+
+interface GitHubRunsResponse {
+    workflow_runs?: GitHubApiRun[];
+}
+
 export async function GET() {
     const token = process.env.GITHUB_TOKEN;
     const owner = process.env.GITHUB_OWNER;
@@ -33,8 +49,8 @@ export async function GET() {
             });
         }
 
-        const data = await res.json();
-        const runs = (data.workflow_runs || []).map((run: any) => ({
+        const data = (await res.json()) as GitHubRunsResponse;
+        const runs = (data.workflow_runs || []).map((run: GitHubApiRun) => ({
             id: run.id,
             runNumber: run.run_number,
             status: run.status,

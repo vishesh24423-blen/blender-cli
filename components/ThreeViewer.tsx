@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 
 declare module 'react' {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
       'model-viewer': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & {
@@ -56,7 +57,6 @@ export default function ThreeViewer({
       className={`relative w-full overflow-hidden rounded-2xl ${className}`}
       style={{ background: 'linear-gradient(135deg, #0a0b0f 0%, #0f0f1e 50%, #0a0b0f 100%)' }}
     >
-      {/* @ts-ignore */}
       <model-viewer
         src={glbUrl}
         poster={previewUrl || ''}
@@ -77,7 +77,10 @@ export default function ThreeViewer({
           backgroundColor: 'transparent',
           '--poster-color': 'transparent',
         } as React.CSSProperties}
-        onProgress={(e: any) => setProgress(Math.round(e.detail.totalProgress * 100))}
+        onProgress={(e) => {
+          const ce = e as unknown as CustomEvent<{ totalProgress: number }>;
+          setProgress(Math.round((ce.detail?.totalProgress ?? 0) * 100));
+        }}
         onLoad={() => setLoaded(true)}
       >
         {/* Loading state */}
@@ -88,6 +91,8 @@ export default function ThreeViewer({
             style={{ background: 'linear-gradient(135deg, #0a0b0f, #0f0f1e)' }}
           >
             {previewUrl && (
+              // Dynamic R2 preview URL — next/image would need remotePatterns config
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={previewUrl}
                 alt="preview"

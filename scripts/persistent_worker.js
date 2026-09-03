@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const admin = require('firebase-admin');
 const { execSync } = require('child_process');
 const fs = require('fs');
@@ -461,18 +462,34 @@ print("[BL] Cinematic post-pass complete ✅")
 `
 };
 
+function indentPython(code) {
+  return String(code || '').split('\n').map(l => (l.trim() === '' ? '' : `    ${l}`)).join('\n');
+}
+
 function buildScript(userScript, outFile, fmt, quality = 'standard') {
-  const indented = String(userScript || '').split('\n').map(l => `    ${l}`).join('\n');
+  const validQualities = ['draft', 'standard', 'cinematic'];
+  const q = validQualities.includes(quality) ? quality : 'standard';
+  const preamble = QUALITY_PREAMBLE[q] || '';
+  const postpass = QUALITY_POSTPASS[q] || '';
+  const indentedUser = indentPython(userScript);
+  const indentedPreamble = indentPython(preamble);
+  const indentedPostpass = indentPython(postpass);
   const outDir = path.dirname(outFile);
+  const previewFile = path.join(outDir, 'preview.png');
   const exportCmd = EXPORT_CMD[fmt](outFile);
 
   return `
-import bpy, sys, os, traceback
+import bpy, sys, os, traceback, math
+try:
+    import mathutils
+except: pass
 
 # ── Debug ──
 print(f"[BL] blender={bpy.app.version_string}")
 print(f"[BL] python={sys.version}")
 print(f"[BL] cwd={os.getcwd()}")
+print(f"[BL] quality=${q}")
+print(f"[BL] format=${fmt}")
 
 # Enable common export addons
 for mod in ['io_scene_gltf2', 'io_scene_fbx', 'io_mesh_stl']:
@@ -487,11 +504,23 @@ try:
 except Exception as e:
     print(f"[BL] clear warn: {e}")
 
+# 1. Quality preamble (defensive: EEVEE props vary across Blender versions,
+#    so a single missing attribute must not fail the whole job)
+print("[BL] PREAMBLE")
+sys.stdout.flush()
+try:
+${indentedPreamble}
+    print("[BL] PREAMBLE_OK")
+except Exception as e:
+    traceback.print_exc()
+    print(f"[BL] PREAMBLE_WARN: {e} - continuing with defaults")
+sys.stdout.flush()
+
 # 2. Run user script
 print("[BL] USER_SCRIPT")
 sys.stdout.flush()
 try:
-${indented}
+${indentedUser}
     print("[BL] USER_OK")
 except Exception as e:
     traceback.print_exc()
@@ -523,6 +552,17 @@ for o in meshes:
     except:
         pass
 
+# 5b. Quality post-pass (defensive: never fails the job)
+print("[BL] POSTPASS")
+sys.stdout.flush()
+try:
+${indentedPostpass}
+    print("[BL] POSTPASS_OK")
+except Exception as e:
+    traceback.print_exc()
+    print(f"[BL] POSTPASS_WARN: {e} - continuing to export")
+sys.stdout.flush()
+
 # 6. Export
 out_file = '${outFile}'
 os.makedirs('${outDir}', exist_ok=True)
@@ -543,6 +583,22 @@ except Exception as e:
     traceback.print_exc()
     print(f"EXPORT_ERR: {e}")
     sys.exit(1)
+
+# 7. Preview render (defensive: missing preview must not fail the job)
+print("[BL] PREVIEW")
+sys.stdout.flush()
+try:
+    preview_file = '${previewFile}'
+    bpy.context.scene.render.filepath = preview_file
+    bpy.context.scene.render.image_settings.file_format = 'PNG'
+    bpy.ops.render.render(write_still=True)
+    if os.path.exists(preview_file):
+        print(f"[BL] PREVIEW_OK size={os.path.getsize(preview_file)}")
+    else:
+        print("[BL] PREVIEW_WARN: file not created")
+except Exception as e:
+    print(f"[BL] PREVIEW_WARN: {e}")
+sys.stdout.flush()
 
 print("[BL] DONE")
 sys.stdout.flush()
@@ -593,6 +649,26 @@ async function processJob(job) {
 
   const workDir = `/tmp/job_${job.id}`;
   fs.mkdirSync(workDir, { recursive: true });
+
+  // Make HDRI available where the preamble expects it:
+  // preamble resolves <script_dir>/assets/studio_small_03_1k.hdr, and the
+  // generated script lives in workDir, so mirror the repo asset there.
+  try {
+    const repoAssets = path.join(__dirname, 'assets');
+    const workAssets = path.join(workDir, 'assets');
+    fs.mkdirSync(workAssets, { recursive: true });
+    const hdrName = 'studio_small_03_1k.hdr';
+    const src = path.join(repoAssets, hdrName);
+    const dst = path.join(workAssets, hdrName);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dst);
+      console.log(`[BL] HDRI staged: ${dst}`);
+    } else {
+      console.log(`[BL] HDRI not in repo (${src}), preamble will use fallback world`);
+    }
+  } catch (e) {
+    console.log(`[BL] HDRI stage warn: ${e.message}`);
+  }
 
   const outputs = {};
   let success = 0;

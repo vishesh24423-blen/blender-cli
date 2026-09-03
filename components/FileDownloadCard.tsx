@@ -1,7 +1,5 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useCountdown } from '@/hooks/useCountdown';
 import { formatFileSize } from '@/lib/utils';
 import type { OutputFormat } from '@/lib/types';
 import { Download, Clock, Package } from 'lucide-react';
@@ -21,9 +19,8 @@ const FORMAT_COLORS: Record<string, string> = {
 };
 
 export default function FileDownloadCard({ format, url, size }: FileDownloadCardProps) {
-    const expiryTime = useMemo(() => Date.now() + 24 * 60 * 60 * 1000, []);
-    const expiry = useCountdown(expiryTime);
-
+    // Static expiry hint keeps the component pure (no Date.now() during render).
+    // R2 signed URLs expire ~24h after the job completes.
     const color = FORMAT_COLORS[format] || '#6b7280';
 
     return (
@@ -52,7 +49,7 @@ export default function FileDownloadCard({ format, url, size }: FileDownloadCard
 
             <div className="download-card-expiry">
                 <Clock size={11} />
-                <span>~{expiry.formatted}</span>
+                <span>Expires in ~24h</span>
             </div>
         </div>
     );

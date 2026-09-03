@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
                             console.log(`✅ Workflow dispatched for job ${jobId}`);
                         } else {
                             const errorText = await dispatchRes.text();
-                            console.error(`⚠️ Failed to dispatch workflow: ${dispatchRes.status}`);
+                            console.error(`⚠️ Failed to dispatch workflow: ${dispatchRes.status} ${errorText}`);
                             await runnerDocRef.update({ status: 'inactive' });
                             runnerStatus = 'inactive';
                         }
