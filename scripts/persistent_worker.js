@@ -1009,6 +1009,26 @@ async function markRunner(status, extra = {}) {
   await runnerRef.set({ status, lastActive: Date.now(), ...extra }, { merge: true });
 }
 
+// A node-level crash (uncaught exception / unhandled rejection) would
+// otherwise freeze Firestore at 'ready'/'active' forever — the UI then
+// shows a live runner for a dead Actions run. Mark inactive first.
+let _crashHandlerInstalled = false;
+function installCrashHandlers() {
+  if (_crashHandlerInstalled) return;
+  _crashHandlerInstalled = true;
+  const shutdown = async (reason, err) => {
+    console.error(`💥 Worker crashing (${reason}):`, err);
+    try {
+      await markRunner('inactive', { note: `crashed: ${String((err && err.message) || err).slice(0, 300)}` });
+    } catch (e) {
+      console.error('Failed to mark runner inactive:', e.message);
+    }
+    process.exit(1);
+  };
+  process.on('uncaughtException', (err) => { shutdown('uncaughtException', err); });
+  process.on('unhandledRejection', (err) => { shutdown('unhandledRejection', err); });
+}
+
 async function getOldestQueuedJob() {
   // Use simple query to avoid requiring composite index
   const snapshot = await db.collection('jobs')
@@ -1105,6 +1125,7 @@ except Exception as e:
 }
 
 async function main() {
+  installCrashHandlers();
   const runnerRef = db.collection('system').doc('runner');
   const now = Date.now();
 
@@ -1172,4 +1193,10 @@ async function main() {
   }
 }
 
-main().catch(err => { console.error('Crashed:', err); process.exit(1); });
+main().catch(async err => {
+  console.error('Crashed:', err);
+  try {
+    await markRunner('inactive', { note: `crashed: ${String((err && err.message) || err).slice(0, 300)}` });
+  } catch {}
+  process.exit(1);
+});

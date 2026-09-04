@@ -84,7 +84,10 @@ export async function POST(request: NextRequest) {
                 // Trigger workflow if runner is NOT actively processing.
                 // First-ever job (no runner doc) → 'inactive' → wake. Stale
                 // 'starting' (dispatch died) also re-wakes via isStale.
-                const isStale = now - lastActive > 5 * 60 * 1000;
+                // Threshold is 2min: the worker heartbeats every 30s, so a
+                // quieter runner is a dead Actions run (its status would
+                // otherwise sit frozen at 'ready' and swallow new jobs).
+                const isStale = now - lastActive > 2 * 60 * 1000;
                 const needsWake = currentStatus === 'inactive' || currentStatus === 'unknown' || isStale;
 
                 if (needsWake) {

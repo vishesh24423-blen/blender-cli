@@ -6,6 +6,7 @@ import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useJob } from '@/hooks/useJob';
 import { useRunner } from '@/hooks/useRunner';
+import { isRunnerAlive } from '@/lib/runner';
 import ThreeViewer from '@/components/ThreeViewer';
 import Link from 'next/link';
 import { ArrowLeft, AlertTriangle, Clock, CheckCircle, Download, Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
@@ -237,6 +238,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
 
     const isQueued = job?.status === 'queued';
     const runnerStatus = runner?.status;
+    const runnerAlive = isRunnerAlive(runner);
 
     // Fetch GitHub Actions run status
     useEffect(() => {
@@ -292,7 +294,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
             return () => clearTimeout(t);
         }
 
-        const isWaking = !runnerStatus || runnerStatus === 'inactive' || runnerStatus === 'starting';
+        const isWaking = !runnerStatus || runnerStatus === 'inactive' || runnerStatus === 'starting' || !runnerAlive;
         if (!isWaking) {
             if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
             const t = setTimeout(() => setWakeTimeout(false), 0);
@@ -306,15 +308,15 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         return () => {
             if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
         };
-    }, [isQueued, runnerStatus]);
+    }, [isQueued, runnerStatus, runnerAlive]);
 
     useEffect(() => {
-        if (runnerStatus === 'ready' || runnerStatus === 'active') {
+        if (runnerAlive && (runnerStatus === 'ready' || runnerStatus === 'active')) {
             if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
             const t = setTimeout(() => setWakeTimeout(false), 0);
             return () => clearTimeout(t);
         }
-    }, [runnerStatus]);
+    }, [runnerStatus, runnerAlive]);
 
     const handleRetry = () => router.push('/');
 
@@ -349,9 +351,9 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
         );
     }
 
-    const isWaking = isQueued && (!runner || runner.status === 'inactive');
-    const isStarting = isQueued && runner?.status === 'starting';
-    const isReallyQueued = isQueued && runner && (runner.status === 'ready' || runner.status === 'active');
+    const isWaking = isQueued && (!runner || runner.status === 'inactive' || !runnerAlive);
+    const isStarting = isQueued && runnerAlive && runner?.status === 'starting';
+    const isReallyQueued = isQueued && runnerAlive && (runner?.status === 'ready' || runner?.status === 'active');
 
     const getBadgeClasses = () => {
         switch (job.status) {

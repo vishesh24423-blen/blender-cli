@@ -46,3 +46,10 @@ jobs:
 
       - name: Run Worker
         run: node scripts/persistent_worker.js
+
+      # Always runs — even when the worker crashes or the job times out.
+      # Without this, Firestore keeps a frozen status: 'ready' forever and
+      # the UI shows a live runner long after the Actions run died.
+      - name: Mark runner inactive on exit
+        if: always()
+        run: node scripts/set_runner_status.js inactive "run ${{ github.run_number }} ended (${{ job.status }})"

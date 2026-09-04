@@ -42,8 +42,11 @@ export interface RunnerInfo {
     windowEndsAt: number;
     currentJobId: string | null;
     lastUpdated: number;
+    /** Written by the worker heartbeat every 30s. Absence/staleness = dead run. */
+    lastActive?: number;
     readyAt?: number;
     startedAt?: number;
     queueLength?: number;
     triggeredJobId?: string;
+    note?: string;
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRunner } from '@/hooks/useRunner';
 import { useCountdown } from '@/hooks/useCountdown';
+import { isRunnerAlive, lastSeenLabel } from '@/lib/runner';
 import type { GitHubRun } from '@/lib/types';
 
 export default function RunnerStatus() {
@@ -57,10 +58,18 @@ export default function RunnerStatus() {
     const isRunCompleted = ghRun && ghRun.status === 'completed';
     const isRunPending = ghRun && ghRun.status === 'pending';
 
-    const isActive = runner.status === 'active';
-    const isReady = runner.status === 'ready';
-    const isStarting = runner.status === 'starting';
-    const isInactive = runner.status === 'inactive';
+    // Liveness beats status: a crashed/failed Actions run stops the 30s
+    // heartbeat, leaving Firestore frozen at 'ready'. Without this check a
+    // dead run shows 🟢 READY with a live countdown (that's what happened
+    // with the failed run while the badge still said READY).
+    // Re-evaluated every second via the countdown tick below.
+    const alive = isRunnerAlive(runner);
+    const stale = !alive && (runner.status === 'active' || runner.status === 'ready' || runner.status === 'starting');
+
+    const isActive = alive && runner.status === 'active';
+    const isReady = alive && runner.status === 'ready';
+    const isStarting = alive && runner.status === 'starting';
+    const isInactive = runner.status === 'inactive' || stale;
 
     return (
         <div className={`runner-status ${
@@ -119,9 +128,13 @@ export default function RunnerStatus() {
                     <span className="gh-run-error">GitHub status unavailable</span>
                 )}
 
+                {stale && runner.note && (
+                    <span className="gh-run-error">{runner.note}</span>
+                )}
+
                 <div className="runner-countdown">
                     {isInactive ? (
-                        <span>Waiting for your first request</span>
+                        <span>{stale ? `${lastSeenLabel(runner)} — submit a job to wake a fresh runner` : 'Waiting for your first request'}</span>
                     ) : (
                         <span>Window: <strong>{activeCountdown.formatted}</strong></span>
                     )}
