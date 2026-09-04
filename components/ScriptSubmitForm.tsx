@@ -228,6 +228,12 @@ export default function ScriptSubmitForm() {
                     <span>Starting GitHub Actions runner... redirecting to job page.</span>
                 </div>
             )}
+
+            {phase === 'idle' && (
+                <p className="quality-hint" style={{ textAlign: 'center', marginTop: '8px' }}>
+                    First generate wakes the runner if it&apos;s idle (~60–90s cold start). Your job queues automatically — track it on the job page.
+                </p>
+            )}
         </div>
     );
 }

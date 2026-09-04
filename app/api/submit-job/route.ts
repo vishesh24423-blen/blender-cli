@@ -81,9 +81,11 @@ export async function POST(request: NextRequest) {
                 const lastActive = runnerData?.lastActive ?? 0;
                 const now = Date.now();
 
-                // Trigger workflow if runner is NOT actively processing
+                // Trigger workflow if runner is NOT actively processing.
+                // First-ever job (no runner doc) → 'inactive' → wake. Stale
+                // 'starting' (dispatch died) also re-wakes via isStale.
                 const isStale = now - lastActive > 5 * 60 * 1000;
-                const needsWake = currentStatus === 'inactive' || isStale;
+                const needsWake = currentStatus === 'inactive' || currentStatus === 'unknown' || isStale;
 
                 if (needsWake) {
                     workflowTriggered = true;
@@ -111,7 +113,7 @@ export async function POST(request: NextRequest) {
 
                 if (!githubToken || !githubOwner || !githubRepo) {
                     console.error(`❌ Missing GitHub env vars: TOKEN=${!!githubToken}, OWNER=${!!githubOwner}, REPO=${!!githubRepo}`);
-                    await runnerDocRef.update({ status: 'inactive' });
+                    await runnerDocRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
                     runnerStatus = 'error';
                 } else {
                     try {
@@ -131,12 +133,12 @@ export async function POST(request: NextRequest) {
                         } else {
                             const errorText = await dispatchRes.text();
                             console.error(`⚠️ Failed to dispatch workflow: ${dispatchRes.status} ${errorText}`);
-                            await runnerDocRef.update({ status: 'inactive' });
+                            await runnerDocRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
                             runnerStatus = 'inactive';
                         }
                     } catch (ghError) {
                         console.error('⚠️ GitHub dispatch error:', ghError);
-                        await runnerDocRef.update({ status: 'inactive' });
+                        await runnerDocRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
                         runnerStatus = 'inactive';
                     }
                 }

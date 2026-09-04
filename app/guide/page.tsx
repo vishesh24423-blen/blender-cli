@@ -8,7 +8,7 @@ import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 const examples = [
   {
     name: 'Simple Cube',
-    description: 'Basic mesh creation with material',
+    description: 'Basic mesh creation with material (Blender 5.x-safe)',
     code: `import bpy
 
 bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
@@ -16,11 +16,14 @@ cube = bpy.context.active_object
 cube.name = "SimpleCube"
 
 mat = bpy.data.materials.new("CubeMaterial")
-mat.use_nodes = True
-bsdf = mat.node_tree.nodes['Principled BSDF']
-bsdf.inputs['Base Color'].default_value = (0.2, 0.8, 0.3, 1.0)
+if not mat.use_nodes:
+    mat.use_nodes = True
+bsdf = mat.node_tree.nodes.get('Principled BSDF')
+if bsdf is not None and 'Base Color' in bsdf.inputs:
+    bsdf.inputs['Base Color'].default_value = (0.2, 0.8, 0.3, 1.0)
 cube.data.materials.append(mat)
 
+bpy.context.view_layer.objects.active = cube
 bpy.ops.object.shade_smooth()
 print("✅ Cube created")`,
   },
@@ -36,6 +39,7 @@ for i in range(12):
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.4, location=(x, y, 0))
     sphere = bpy.context.active_object
     sphere.name = f"Sphere_{i}"
+    bpy.context.view_layer.objects.active = sphere
     bpy.ops.object.shade_smooth()
 
 print("✅ Created 12 spheres")`,
@@ -49,7 +53,8 @@ bpy.ops.mesh.primitive_uv_sphere_add(radius=2, location=(0, 0, 0))
 sphere = bpy.context.active_object
 
 mat = bpy.data.materials.new("ProceduralMaterial")
-mat.use_nodes = True
+if not mat.use_nodes:
+    mat.use_nodes = True
 nodes = mat.node_tree.nodes
 links = mat.node_tree.links
 nodes.clear()
@@ -57,16 +62,19 @@ nodes.clear()
 output = nodes.new('ShaderNodeOutputMaterial')
 bsdf = nodes.new('ShaderNodeBsdfPrincipled')
 texture = nodes.new('ShaderNodeTexNoise')
-colorRamp = nodes.new('ShaderNodeValRamp')
+colorRamp = nodes.new('ShaderNodeValToRGB')
 
 links.new(texture.outputs['Fac'], colorRamp.inputs['Fac'])
 links.new(colorRamp.outputs['Color'], bsdf.inputs['Base Color'])
 links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
 
-bsdf.inputs['Roughness'].default_value = 0.3
-texture.inputs['Scale'].default_value = 5.0
+if 'Roughness' in bsdf.inputs:
+    bsdf.inputs['Roughness'].default_value = 0.3
+if 'Scale' in texture.inputs:
+    texture.inputs['Scale'].default_value = 5.0
 
 sphere.data.materials.append(mat)
+bpy.context.view_layer.objects.active = sphere
 bpy.ops.object.shade_smooth()
 print("✅ Sphere with procedural material")`,
   },
@@ -89,6 +97,7 @@ array = obj.modifiers.new('Array', 'ARRAY')
 array.count = 3
 array.relative_offset_displace[0] = 2.5
 
+bpy.context.view_layer.objects.active = obj
 bpy.ops.object.shade_smooth()
 print("✅ Cylinder with modifiers")`,
   },
@@ -143,20 +152,24 @@ export default function ScriptGuidePage() {
             <section className="guide-section">
               <h2 className="guide-section-title">Golden Rule</h2>
               <div className="guide-tip guide-tip--success">
-                <p>Your script should <strong>ONLY create geometry</strong>. Let BlenderLab handle everything else.</p>
+                <p>Your script should <strong>ONLY create geometry</strong>. Let BlenderLab handle everything else (scene clear, camera, lighting, export, preview).</p>
               </div>
             </section>
 
-            {/* DON'T */}
+            {/* WHICH SCRIPTS WORK */}
             <section className="guide-section">
-              <h2 className="guide-section-title guide-section-title--danger">DON&apos;T Include</h2>
+              <h2 className="guide-section-title guide-section-title--success">✅ Which Python scripts work?</h2>
+              <div className="guide-tip guide-tip--success">
+                <p><strong>Any script that creates meshes and stops.</strong> The worker wraps your code as: clear scene → preamble (camera + HDRI) → <em>your script</em> → post-pass → export → preview. If your code leaves ≥1 MESH object behind, it exports.</p>
+              </div>
               <div className="guide-grid">
                 {[
-                  { title: 'Scene Clearing', code: `bpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()`, reason: 'Worker handles this automatically' },
-                  { title: 'Export Code', code: `bpy.ops.export_scene.gltf(filepath=..., export_format='GLB')`, reason: 'Worker handles export' },
-                  { title: 'Render Settings', code: `scene.render.engine = 'CYCLES'`, reason: 'Worker sets optimal settings' },
+                  { title: '✅ bpy.ops primitives', code: `bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))\ncube = bpy.context.active_object\ncube.name = "MyCube"`, reason: 'Most reliable' },
+                  { title: '✅ from_pydata', code: `mesh = bpy.data.meshes.new("M")\nmesh.from_pydata(verts, [], faces)\nmesh.update()\nobj = bpy.data.objects.new("Obj", mesh)\nbpy.context.scene.collection.objects.link(obj)`, reason: 'Fully supported' },
+                  { title: '✅ bmesh', code: `import bmesh\nbm = bmesh.new()\n# ... build verts/faces ...\nmesh = bpy.data.meshes.new("M")\nbm.to_mesh(mesh)\nbm.free()\nobj = bpy.data.objects.new("Obj", mesh)\nbpy.context.scene.collection.objects.link(obj)`, reason: 'Must link object' },
+                  { title: '✅ Modifiers + materials', code: `cube.modifiers.new("Subdiv", 'SUBSURF')\nmat = bpy.data.materials.new("M")\nif not mat.use_nodes:\n    mat.use_nodes = True  # Blender 6.0 deprecates unconditional set`, reason: 'Guard socket names' },
                 ].map((item, idx) => (
-                  <div key={idx} className="guide-card guide-card--danger">
+                  <div key={idx} className="guide-card">
                     <div className="guide-card-header">
                       <span className="guide-card-title">{item.title}</span>
                       <span className="guide-card-reason">{item.reason}</span>
@@ -169,15 +182,43 @@ export default function ScriptGuidePage() {
               </div>
             </section>
 
+            {/* DON'T */}
+            <section className="guide-section">
+              <h2 className="guide-section-title guide-section-title--danger">❌ DON&apos;T Include (breaks jobs)</h2>
+              <div className="guide-grid">
+                {[
+                  { title: 'Own export', code: `bpy.ops.export_scene.gltf(filepath=..., export_format='GLB')`, reason: 'Worker exports — yours exports nothing (esp. use_selection=True with no selection)' },
+                  { title: 'Own render', code: `bpy.ops.render.render(write_still=True)`, reason: 'Worker renders preview (with camera)' },
+                  { title: 'Engine override', code: `scene.render.engine = 'BLENDER_EEVEE_NEXT'  # crashes on Blender 5.2\nscene.render.engine = 'CYCLES'`, reason: "5.2 only has BLENDER_EEVEE / WORKBENCH / CYCLES" },
+                  { title: 'Exit / quit', code: `sys.exit(1)\nquit()\nbpy.ops.wm.quit_blender()`, reason: 'Kills job before export' },
+                  { title: 'CLI args', code: `argparse / sys.argv --output-dir`, reason: 'Runner calls blender with no extra args' },
+                  { title: 'Scene reload', code: `bpy.ops.wm.read_factory_settings()\nbpy.ops.wm.read_homefile()\nbpy.ops.object.select_all(action='SELECT')\nbpy.ops.object.delete()`, reason: 'Wipes preamble camera + lighting' },
+                ].map((item, idx) => (
+                  <div key={idx} className="guide-card guide-card--danger">
+                    <div className="guide-card-header">
+                      <span className="guide-card-title">{item.title}</span>
+                      <span className="guide-card-reason">{item.reason}</span>
+                    </div>
+                    <SyntaxHighlighter language="python" style={atomOneDark} customStyle={{ padding: '12px', borderRadius: '6px', fontSize: '12px', margin: 0 }}>
+                      {item.code}
+                    </SyntaxHighlighter>
+                  </div>
+                ))}
+              </div>
+              <div className="guide-tip guide-tip--success" style={{ marginTop: '12px' }}>
+                <p><strong>Fix for the classic &quot;dog script&quot; failure:</strong> delete your <code>bpy.ops.export_scene.gltf(..., use_selection=True)</code> block, delete the <code>--output-dir</code> / <code>if __name__ == &quot;__main__&quot;</code> wrapper, and just leave the geometry-building code at top level. The worker exports to <code>output.glb</code> itself.</p>
+              </div>
+            </section>
+
             {/* DO */}
             <section className="guide-section">
-              <h2 className="guide-section-title guide-section-title--success">DO Include</h2>
+              <h2 className="guide-section-title guide-section-title--success">DO Include (Blender 5.x-safe patterns)</h2>
               <div className="guide-grid">
                 {[
                   { title: 'Geometry Creation', code: `bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))` },
-                  { title: 'Materials', code: `mat = bpy.data.materials.new("MyMaterial")\nmat.use_nodes = True` },
+                  { title: 'Version-safe material', code: `mat = bpy.data.materials.new("MyMaterial")\nif not mat.use_nodes:\n    mat.use_nodes = True\nbsdf = mat.node_tree.nodes.get("Principled BSDF")\nif bsdf is not None and 'Base Color' in bsdf.inputs:\n    bsdf.inputs['Base Color'].default_value = (0.1, 0.5, 0.9, 1.0)` },
                   { title: 'Modifiers', code: `bevel = cube.modifiers.new("Bevel", 'BEVEL')\nbevel.width = 0.1` },
-                  { title: 'Smooth Shading', code: `bpy.ops.object.shade_smooth()` },
+                  { title: 'Smooth Shading', code: `bpy.context.view_layer.objects.active = cube\nbpy.ops.object.shade_smooth()` },
                 ].map((item, idx) => (
                   <div key={idx} className="guide-card">
                     <h3 className="guide-card-title">{item.title}</h3>
@@ -191,14 +232,16 @@ export default function ScriptGuidePage() {
 
             {/* Pro Tips */}
             <section className="guide-section">
-              <h2 className="guide-section-title">Pro Tips</h2>
+              <h2 className="guide-section-title">Pro Tips (Blender 5.2)</h2>
               <div className="guide-tips-list">
                 {[
                   'Use descriptive object names (cube.name = "MyObject")',
-                  'Call bpy.ops.object.shade_smooth() on mesh objects',
-                  'Use materials to add color and realism',
-                  'Test your script locally before submitting',
-                  'Use print() statements for debugging',
+                  'Set the active object before shade_smooth: bpy.context.view_layer.objects.active = cube',
+                  'Guard material sockets: if \'Base Color\' in bsdf.inputs — names change between versions',
+                  'Only set mat.use_nodes = True when it is False (unconditional set warns on 5.2, removed in 6.0)',
+                  'Never set render.engine yourself — BLENDER_EEVEE_NEXT does not exist on 5.2 (use BLENDER_EEVEE)',
+                  'First run takes 60–90s (runner cold-start: snap install + Blender boot). Watch the job page, not just the landing badge.',
+                  'Use print() statements for debugging — they appear in the GitHub Actions log',
                 ].map((tip, idx) => (
                   <div key={idx} className="guide-tip-item">
                     <span className="guide-tip-arrow">→</span> {tip}

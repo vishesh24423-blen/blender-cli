@@ -198,15 +198,24 @@ function FailedState({ job, onRetry }: { job: Job; onRetry: () => void }) {
     );
 }
 
-function RunnerTimeoutState() {
+function RunnerTimeoutState({ ghRun }: { ghRun?: GitHubRun }) {
     return (
         <div className="status-card">
             <div className="status-card-center gap-3">
                 <AlertTriangle size={28} color="var(--accent-amber)" />
                 <p className="text-base font-medium">Runner is taking longer than expected</p>
                 <p className="text-sm text-white/40 text-center max-w-sm">
-                    The GitHub Actions runner may still be starting up. Your job is queued and will process automatically once the runner connects.
+                    The GitHub Actions runner may still be starting up (cold start: snap install + Blender boot takes 60–90s).
+                    Your job is queued and will process automatically once the runner connects. Check the run below — if it
+                    shows failed, re-submit to wake a fresh runner.
                 </p>
+                {ghRun && (
+                    <a href={ghRun.htmlUrl} target="_blank" rel="noopener noreferrer" className="gh-run-badge">
+                        <span className={`gh-dot ${ghRun.status === 'completed' ? 'gh-dot--done' : 'gh-dot--active'}`} />
+                        GitHub Actions #{ghRun.runNumber}: {ghRun.status}
+                        <ExternalLink size={12} />
+                    </a>
+                )}
                 <Link href="/" className="retry-button">
                     <ArrowLeft size={14} />
                     Back to home
@@ -396,7 +405,7 @@ export default function JobPage({ params }: { params: Promise<{ jobId: string }>
                     </div>
                 </div>
 
-                {job.status === 'queued' && wakeTimeout && <RunnerTimeoutState />}
+                {job.status === 'queued' && wakeTimeout && <RunnerTimeoutState ghRun={ghRun} />}
                 {job.status === 'queued' && !wakeTimeout && isWaking && <RunnerWakingState ghRun={ghRun} />}
                 {job.status === 'queued' && !wakeTimeout && isStarting && <RunnerStartingState ghRun={ghRun} />}
                 {job.status === 'queued' && !wakeTimeout && isReallyQueued && (

@@ -89,24 +89,69 @@ if not exported:
 };
 
 const QUALITY_PREAMBLE = {
-  draft: '',
+  // Draft is intentionally minimal but MUST still leave a camera behind,
+  // otherwise the preview render always fails with "no camera".
+  // Fully version-safe: works on Blender 4.x (BLENDER_EEVEE_NEXT) and 5.x (BLENDER_EEVEE).
+  draft: `import bpy, os, math
+# BLENDERLAB DRAFT PREAMBLE — minimal, version-safe
+def _bl_set(obj, attr, val):
+    try:
+        if hasattr(obj, attr):
+            setattr(obj, attr, val)
+    except:
+        pass
+try:
+    bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
+except:
+    try:
+        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+    except:
+        pass
+try:
+    if bpy.context.scene.camera is None:
+        _cd = bpy.data.cameras.new("BL_Cam")
+        _co = bpy.data.objects.new("BL_Cam", _cd)
+        bpy.context.scene.collection.objects.link(_co)
+        bpy.context.scene.camera = _co
+        _co.location = (0, -6, 2)
+        _co.rotation_euler = (math.radians(75), 0, 0)
+except Exception as _e:
+    print(f"[BL] draft cam warn: {_e}")
+print("[BL] Draft preamble complete — running user script...")
+`,
   standard: `import bpy, os, math
 # ══════════════════════════════════════════════════
 #  BLENDERLAB QUALITY PREAMBLE — DO NOT EDIT
 # ══════════════════════════════════════════════════
-# 1. Render engine — EEVEE Next (CPU, no GPU needed)
-bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
-eevee = bpy.context.scene.eevee
-eevee.use_gtao                = True
-eevee.gtao_distance           = 0.4
-eevee.use_bloom               = True
-eevee.bloom_threshold         = 0.70
-eevee.bloom_intensity         = 0.45
-eevee.bloom_radius            = 6.0
-eevee.use_ssr                 = True
-eevee.ssr_quality             = 0.5
-eevee.use_shadow_high_bitdepth= True
-eevee.shadow_cube_size        = '1024'
+def _bl_set(obj, attr, val):
+    try:
+        if hasattr(obj, attr):
+            setattr(obj, attr, val)
+    except:
+        pass
+# 1. Render engine — version-safe (4.x: EEVEE_NEXT, 5.x: EEVEE, fallback: keep default)
+try:
+    bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
+except:
+    try:
+        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+    except Exception as _e:
+        print(f"[BL] engine warn: {_e}")
+try:
+    _eevee = getattr(bpy.context.scene, 'eevee', None)
+    if _eevee is not None:
+        _bl_set(_eevee, 'use_gtao', True)
+        _bl_set(_eevee, 'gtao_distance', 0.4)
+        _bl_set(_eevee, 'use_bloom', True)
+        _bl_set(_eevee, 'bloom_threshold', 0.70)
+        _bl_set(_eevee, 'bloom_intensity', 0.45)
+        _bl_set(_eevee, 'bloom_radius', 6.0)
+        _bl_set(_eevee, 'use_ssr', True)
+        _bl_set(_eevee, 'ssr_quality', 0.5)
+        _bl_set(_eevee, 'use_shadow_high_bitdepth', True)
+        _bl_set(_eevee, 'shadow_cube_size', '1024')
+except Exception as _e:
+    print(f"[BL] eevee opts warn: {_e}")
 
 # 2. Transparent background + RGBA
 bpy.context.scene.render.film_transparent = True
@@ -117,51 +162,76 @@ bpy.context.scene.render.resolution_x          = 1920
 bpy.context.scene.render.resolution_y          = 1080
 bpy.context.scene.render.resolution_percentage = 100
 
-# 4. HDRI world lighting (IBL)
-world = bpy.data.worlds.new("BL_World")
-bpy.context.scene.world = world
-world.use_nodes = True
-wn = world.node_tree.nodes
-wl = world.node_tree.links
-wn.clear()
+# 4. HDRI world lighting (IBL) — isolated so a missing HDRI never kills the job
+try:
+    world = bpy.data.worlds.new("BL_World")
+    bpy.context.scene.world = world
+    try:
+        world.use_nodes = True
+    except:
+        pass
+    wn = world.node_tree.nodes
+    wl = world.node_tree.links
+    wn.clear()
+    bg      = wn.new("ShaderNodeBackground")
+    env     = wn.new("ShaderNodeTexEnvironment")
+    mapping = wn.new("ShaderNodeMapping")
+    texco   = wn.new("ShaderNodeTexCoord")
+    wo      = wn.new("ShaderNodeOutputWorld")
+    hdr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'studio_small_03_1k.hdr')
+    if os.path.exists(hdr_path):
+        try:
+            env.image = bpy.data.images.load(hdr_path)
+            print(f"[BL] HDRI loaded: {hdr_path}")
+        except Exception as _e:
+            print(f"[BL] HDRI load warn: {_e}")
+            if 'Color' in bg.inputs:
+                bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
+    else:
+        print(f"[BL] WARNING: HDRI not found at {hdr_path}, using white world")
+        if 'Color' in bg.inputs:
+            bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
+    if 'Strength' in bg.inputs:
+        bg.inputs['Strength'].default_value = 2.0
+    wl.new(texco.outputs['Generated'], mapping.inputs['Vector'])
+    wl.new(mapping.outputs['Vector'], env.inputs['Vector'])
+    wl.new(env.outputs['Color'],      bg.inputs['Color'])
+    wl.new(bg.outputs['Background'],  wo.inputs['Surface'])
+except Exception as _e:
+    print(f"[BL] world warn: {_e}")
 
-bg      = wn.new("ShaderNodeBackground")
-env     = wn.new("ShaderNodeTexEnvironment")
-mapping = wn.new("ShaderNodeMapping")
-texco   = wn.new("ShaderNodeTexCoord")
-wo      = wn.new("ShaderNodeOutputWorld")
+# 5. Camera — hero shot, auto-frames after geometry is created.
+# Reuses existing camera if preamble re-runs or one already exists.
+try:
+    cam_obj = bpy.context.scene.camera
+    if cam_obj is None:
+        cam_data = bpy.data.cameras.new("BL_Cam")
+        try:
+            cam_data.lens = 85
+        except:
+            pass
+        try:
+            cam_data.dof.use_dof = True
+            cam_data.dof.aperture_fstop = 2.8
+        except:
+            pass
+        cam_obj = bpy.data.objects.new("BL_Cam", cam_data)
+        bpy.context.scene.collection.objects.link(cam_obj)
+        bpy.context.scene.camera = cam_obj
+        cam_obj.location       = (0, -6, 2)
+        cam_obj.rotation_euler = (math.radians(75), 0, 0)
+except Exception as _e:
+    print(f"[BL] camera warn: {_e}")
 
-hdr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'studio_small_03_1k.hdr')
-if os.path.exists(hdr_path):
-    env.image = bpy.data.images.load(hdr_path)
-    print(f"[BL] HDRI loaded: {hdr_path}")
-else:
-    print(f"[BL] WARNING: HDRI not found at {hdr_path}, using white world")
-    bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
-
-bg.inputs['Strength'].default_value = 2.0
-wl.new(texco.outputs['Generated'], mapping.inputs['Vector'])
-wl.new(mapping.outputs['Vector'], env.inputs['Vector'])
-wl.new(env.outputs['Color'],      bg.inputs['Color'])
-wl.new(bg.outputs['Background'],  wo.inputs['Surface'])
-
-# 5. Camera — hero shot, auto-frames after geometry is created
-cam_data = bpy.data.cameras.new("BL_Cam")
-cam_data.lens              = 85
-cam_data.dof.use_dof       = True
-cam_data.dof.aperture_fstop = 2.8
-cam_obj  = bpy.data.objects.new("BL_Cam", cam_data)
-bpy.context.scene.collection.objects.link(cam_obj)
-bpy.context.scene.camera = cam_obj
-cam_obj.location       = (0, -6, 2)
-cam_obj.rotation_euler = (math.radians(75), 0, 0)
-
-# 6. Shadow catcher ground plane
-bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, -0.01))
-_sc = bpy.context.active_object
-_sc.name             = "_ShadowCatcher"
-_sc.is_shadow_catcher = True
-_sc.visible_diffuse  = False
+# 6. Shadow catcher ground plane (optional — never fatal)
+try:
+    bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, -0.01))
+    _sc = bpy.context.active_object
+    _sc.name = "_ShadowCatcher"
+    _bl_set(_sc, 'is_shadow_catcher', True)
+    _bl_set(_sc, 'visible_diffuse', False)
+except Exception as _e:
+    print(f"[BL] shadowcatcher warn: {_e}")
 
 print("[BL] Preamble complete — running user script...")
 # ══════════════════════════════════════════════════
@@ -170,21 +240,37 @@ print("[BL] Preamble complete — running user script...")
 # ══════════════════════════════════════════════════
 #  BLENDERLAB CINEMATIC PREAMBLE — DO NOT EDIT
 # ══════════════════════════════════════════════════
-# 1. Render engine — EEVEE Next (CPU, no GPU needed)
-bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
-eevee = bpy.context.scene.eevee
-eevee.use_gtao                = True
-eevee.gtao_distance           = 0.4
-eevee.use_bloom               = True
-eevee.bloom_threshold         = 0.70
-eevee.bloom_intensity         = 0.6
-eevee.bloom_radius            = 8.0
-eevee.use_ssr                 = True
-eevee.ssr_quality             = 0.5
-eevee.use_shadow_high_bitdepth= True
-eevee.shadow_cube_size        = '2048'
-eevee.use_volumetric_lights   = True
-eevee.use_volumetric_shadows  = True
+def _bl_set(obj, attr, val):
+    try:
+        if hasattr(obj, attr):
+            setattr(obj, attr, val)
+    except:
+        pass
+# 1. Render engine — version-safe (4.x: EEVEE_NEXT, 5.x: EEVEE)
+try:
+    bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
+except:
+    try:
+        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
+    except Exception as _e:
+        print(f"[BL] engine warn: {_e}")
+try:
+    _eevee = getattr(bpy.context.scene, 'eevee', None)
+    if _eevee is not None:
+        _bl_set(_eevee, 'use_gtao', True)
+        _bl_set(_eevee, 'gtao_distance', 0.4)
+        _bl_set(_eevee, 'use_bloom', True)
+        _bl_set(_eevee, 'bloom_threshold', 0.70)
+        _bl_set(_eevee, 'bloom_intensity', 0.6)
+        _bl_set(_eevee, 'bloom_radius', 8.0)
+        _bl_set(_eevee, 'use_ssr', True)
+        _bl_set(_eevee, 'ssr_quality', 0.5)
+        _bl_set(_eevee, 'use_shadow_high_bitdepth', True)
+        _bl_set(_eevee, 'shadow_cube_size', '2048')
+        _bl_set(_eevee, 'use_volumetric_lights', True)
+        _bl_set(_eevee, 'use_volumetric_shadows', True)
+except Exception as _e:
+    print(f"[BL] eevee opts warn: {_e}")
 
 # 2. Transparent background + RGBA
 bpy.context.scene.render.film_transparent = True
@@ -195,51 +281,75 @@ bpy.context.scene.render.resolution_x          = 3840
 bpy.context.scene.render.resolution_y          = 2160
 bpy.context.scene.render.resolution_percentage = 100
 
-# 4. HDRI world lighting (IBL)
-world = bpy.data.worlds.new("BL_World")
-bpy.context.scene.world = world
-world.use_nodes = True
-wn = world.node_tree.nodes
-wl = world.node_tree.links
-wn.clear()
+# 4. HDRI world lighting (IBL) — isolated so a missing HDRI never kills the job
+try:
+    world = bpy.data.worlds.new("BL_World")
+    bpy.context.scene.world = world
+    try:
+        world.use_nodes = True
+    except:
+        pass
+    wn = world.node_tree.nodes
+    wl = world.node_tree.links
+    wn.clear()
+    bg      = wn.new("ShaderNodeBackground")
+    env     = wn.new("ShaderNodeTexEnvironment")
+    mapping = wn.new("ShaderNodeMapping")
+    texco   = wn.new("ShaderNodeTexCoord")
+    wo      = wn.new("ShaderNodeOutputWorld")
+    hdr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'studio_small_03_1k.hdr')
+    if os.path.exists(hdr_path):
+        try:
+            env.image = bpy.data.images.load(hdr_path)
+            print(f"[BL] HDRI loaded: {hdr_path}")
+        except Exception as _e:
+            print(f"[BL] HDRI load warn: {_e}")
+            if 'Color' in bg.inputs:
+                bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
+    else:
+        print(f"[BL] WARNING: HDRI not found at {hdr_path}, using white world")
+        if 'Color' in bg.inputs:
+            bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
+    if 'Strength' in bg.inputs:
+        bg.inputs['Strength'].default_value = 2.0
+    wl.new(texco.outputs['Generated'], mapping.inputs['Vector'])
+    wl.new(mapping.outputs['Vector'], env.inputs['Vector'])
+    wl.new(env.outputs['Color'],      bg.inputs['Color'])
+    wl.new(bg.outputs['Background'],  wo.inputs['Surface'])
+except Exception as _e:
+    print(f"[BL] world warn: {_e}")
 
-bg      = wn.new("ShaderNodeBackground")
-env     = wn.new("ShaderNodeTexEnvironment")
-mapping = wn.new("ShaderNodeMapping")
-texco   = wn.new("ShaderNodeTexCoord")
-wo      = wn.new("ShaderNodeOutputWorld")
+# 5. Camera — hero shot with shallow DOF (reuses existing camera if present)
+try:
+    cam_obj = bpy.context.scene.camera
+    if cam_obj is None:
+        cam_data = bpy.data.cameras.new("BL_Cam")
+        try:
+            cam_data.lens = 85
+        except:
+            pass
+        try:
+            cam_data.dof.use_dof = True
+            cam_data.dof.aperture_fstop = 1.8
+        except:
+            pass
+        cam_obj = bpy.data.objects.new("BL_Cam", cam_data)
+        bpy.context.scene.collection.objects.link(cam_obj)
+        bpy.context.scene.camera = cam_obj
+        cam_obj.location       = (0, -6, 2)
+        cam_obj.rotation_euler = (math.radians(75), 0, 0)
+except Exception as _e:
+    print(f"[BL] camera warn: {_e}")
 
-hdr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'studio_small_03_1k.hdr')
-if os.path.exists(hdr_path):
-    env.image = bpy.data.images.load(hdr_path)
-    print(f"[BL] HDRI loaded: {hdr_path}")
-else:
-    print(f"[BL] WARNING: HDRI not found at {hdr_path}, using white world")
-    bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
-
-bg.inputs['Strength'].default_value = 2.0
-wl.new(texco.outputs['Generated'], mapping.inputs['Vector'])
-wl.new(mapping.outputs['Vector'], env.inputs['Vector'])
-wl.new(env.outputs['Color'],      bg.inputs['Color'])
-wl.new(bg.outputs['Background'],  wo.inputs['Surface'])
-
-# 5. Camera — hero shot with shallow DOF
-cam_data = bpy.data.cameras.new("BL_Cam")
-cam_data.lens              = 85
-cam_data.dof.use_dof       = True
-cam_data.dof.aperture_fstop = 1.8
-cam_obj  = bpy.data.objects.new("BL_Cam", cam_data)
-bpy.context.scene.collection.objects.link(cam_obj)
-bpy.context.scene.camera = cam_obj
-cam_obj.location       = (0, -6, 2)
-cam_obj.rotation_euler = (math.radians(75), 0, 0)
-
-# 6. Shadow catcher ground plane
-bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, -0.01))
-_sc = bpy.context.active_object
-_sc.name             = "_ShadowCatcher"
-_sc.is_shadow_catcher = True
-_sc.visible_diffuse  = False
+# 6. Shadow catcher ground plane (optional — never fatal)
+try:
+    bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, -0.01))
+    _sc = bpy.context.active_object
+    _sc.name = "_ShadowCatcher"
+    _bl_set(_sc, 'is_shadow_catcher', True)
+    _bl_set(_sc, 'visible_diffuse', False)
+except Exception as _e:
+    print(f"[BL] shadowcatcher warn: {_e}")
 
 print("[BL] Cinematic preamble complete — running user script...")
 # ══════════════════════════════════════════════════
@@ -247,7 +357,52 @@ print("[BL] Cinematic preamble complete — running user script...")
 };
 
 const QUALITY_POSTPASS = {
-  draft: '',
+  // Draft post-pass: only ensure + auto-frame the camera (fast, never fails).
+  // No material overrides, no compositor — keeps draft ~30s.
+  draft: `
+# BLENDERLAB DRAFT POST-PASS — camera ensure only
+import bpy, mathutils
+print("[BL] Running draft post-pass (camera ensure)...")
+try:
+    _meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.name.startswith('_')]
+    _cam = bpy.context.scene.camera
+    if _cam is None:
+        try:
+            _cd = bpy.data.cameras.new("BL_Cam_Fix")
+            _cam = bpy.data.objects.new("BL_Cam_Fix", _cd)
+            bpy.context.scene.collection.objects.link(_cam)
+            bpy.context.scene.camera = _cam
+            print("[BL] draft: created missing camera")
+        except Exception as _e:
+            print(f"[BL] draft cam create warn: {_e}")
+            _cam = None
+    if _cam is not None and _meshes:
+        try:
+            inf = float('inf')
+            mn = mathutils.Vector((inf, inf, inf))
+            mx = mathutils.Vector((-inf, -inf, -inf))
+            for ob in _meshes:
+                for corner in ob.bound_box:
+                    w = ob.matrix_world @ mathutils.Vector(corner)
+                    mn = mathutils.Vector((min(mn.x, w.x), min(mn.y, w.y), min(mn.z, w.z)))
+                    mx = mathutils.Vector((max(mx.x, w.x), max(mx.y, w.y), max(mx.z, w.z)))
+            center = (mn + mx) / 2
+            diagonal = (mx - mn).length
+            distance = max(diagonal * 2.2, 1.5)
+            _cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
+            direction = center - _cam.location
+            _cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+            try:
+                _cam.data.dof.focus_distance = distance
+            except:
+                pass
+            print(f"[BL] draft camera framed: distance={distance:.2f}")
+        except Exception as _e:
+            print(f"[BL] draft frame warn: {_e}")
+except Exception as _e:
+    print(f"[BL] draft postpass warn: {_e}")
+print("[BL] Draft post-pass complete")
+`,
   standard: `
 # ══════════════════════════════════════════════════
 #  BLENDERLAB POST-PASS — DO NOT EDIT
@@ -265,91 +420,129 @@ SPLINE_PALETTE = [
     (0.95, 0.45, 0.05),   # amber
 ]
 
-mesh_objects = [o for o in bpy.data.objects 
+mesh_objects = [o for o in bpy.data.objects
                 if o.type == 'MESH' and not o.name.startswith('_')]
 
 for idx, obj in enumerate(mesh_objects):
-    # ── Ensure material exists ──
-    if obj.data.materials:
-        mat = obj.data.materials[0]
+    try:
+        # ── Ensure material exists (Blender 6.0: use_nodes deprecated, only set if needed) ──
+        if obj.data.materials:
+            mat = obj.data.materials[0]
+        else:
+            mat = bpy.data.materials.new(f"BL_Mat_{idx}")
+            try:
+                if not mat.use_nodes:
+                    mat.use_nodes = True
+            except:
+                pass
+            obj.data.materials.append(mat)
+        try:
+            if not mat.use_nodes:
+                mat.use_nodes = True
+        except:
+            pass
+        nodes = mat.node_tree.nodes
+        bsdf  = nodes.get("Principled BSDF")
+        if not bsdf:
+            bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        # ── Color: only override if still default grey ──
+        try:
+            if 'Base Color' in bsdf.inputs:
+                col = bsdf.inputs['Base Color'].default_value
+                is_grey = (abs(col[0]-0.8)<0.08 and abs(col[1]-0.8)<0.08 and abs(col[2]-0.8)<0.08)
+                if is_grey:
+                    r,g,b = SPLINE_PALETTE[idx % len(SPLINE_PALETTE)]
+                    bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
+        except Exception as _e:
+            print(f"[BL] color warn {obj.name}: {_e}")
+        # ── Spline PBR signature (all guarded — socket names vary by version) ──
+        try:
+            if 'Roughness' in bsdf.inputs:
+                bsdf.inputs['Roughness'].default_value = 0.18
+            if 'Specular IOR Level' in bsdf.inputs:
+                bsdf.inputs['Specular IOR Level'].default_value = 0.85
+            if 'Coat Weight' in bsdf.inputs:
+                bsdf.inputs['Coat Weight'].default_value    = 0.55
+                bsdf.inputs['Coat Roughness'].default_value = 0.05
+            if 'Sheen Weight' in bsdf.inputs:
+                bsdf.inputs['Sheen Weight'].default_value   = 0.04
+        except Exception as _e:
+            print(f"[BL] pbr warn {obj.name}: {_e}")
+        # ── Smooth shading ──
+        try:
+            for poly in obj.data.polygons:
+                poly.use_smooth = True
+            obj.data.update()
+        except:
+            pass
+    except Exception as _e:
+        print(f"[BL] material warn {obj.name}: {_e}")
+
+# ── AUTO-FRAME CAMERA (creates one if preamble failed) ──────
+try:
+    if mesh_objects:
+        inf = float('inf')
+        mn  = mathutils.Vector(( inf,  inf,  inf))
+        mx  = mathutils.Vector((-inf, -inf, -inf))
+        for ob in mesh_objects:
+            for corner in ob.bound_box:
+                w = ob.matrix_world @ mathutils.Vector(corner)
+                mn = mathutils.Vector((min(mn.x,w.x), min(mn.y,w.y), min(mn.z,w.z)))
+                mx = mathutils.Vector((max(mx.x,w.x), max(mx.y,w.y), max(mx.z,w.z)))
+        center   = (mn + mx) / 2
+        diagonal = (mx - mn).length
+        distance = max(diagonal * 2.2, 1.5)
+        cam = bpy.context.scene.camera
+        if cam is None:
+            _cd = bpy.data.cameras.new("BL_Cam_Fix")
+            cam = bpy.data.objects.new("BL_Cam_Fix", _cd)
+            bpy.context.scene.collection.objects.link(cam)
+            bpy.context.scene.camera = cam
+            print("[BL] created missing camera in post-pass")
+        cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
+        direction    = center - cam.location
+        cam.rotation_euler = direction.to_track_quat('-Z','Y').to_euler()
+        try:
+            cam.data.dof.focus_distance = distance
+        except:
+            pass
+        print(f"[BL] Camera auto-framed: distance={distance:.2f}, center={center}")
     else:
-        mat = bpy.data.materials.new(f"BL_Mat_{idx}")
-        mat.use_nodes = True
-        obj.data.materials.append(mat)
-    
-    mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    bsdf  = nodes.get("Principled BSDF")
-    if not bsdf:
-        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
-    
-    # ── Color: only override if still default grey ──
-    col = bsdf.inputs['Base Color'].default_value
-    is_grey = (abs(col[0]-0.8)<0.08 and abs(col[1]-0.8)<0.08 and abs(col[2]-0.8)<0.08)
-    if is_grey:
-        r,g,b = SPLINE_PALETTE[idx % len(SPLINE_PALETTE)]
-        bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
-    
-    # ── Spline PBR signature ──
-    bsdf.inputs['Roughness'].default_value = 0.18
-    if 'Specular IOR Level' in bsdf.inputs:
-        bsdf.inputs['Specular IOR Level'].default_value = 0.85
-    if 'Coat Weight' in bsdf.inputs:
-        bsdf.inputs['Coat Weight'].default_value    = 0.55
-        bsdf.inputs['Coat Roughness'].default_value = 0.05
-    if 'Sheen Weight' in bsdf.inputs:
-        bsdf.inputs['Sheen Weight'].default_value   = 0.04
-    
-    # ── Smooth shading ──
-    for poly in obj.data.polygons:
-        poly.use_smooth = True
-    obj.data.update()
+        print("[BL] no meshes for framing")
+except Exception as _e:
+    print(f"[BL] frame warn: {_e}")
 
-# ── AUTO-FRAME CAMERA ──────────────────────────────────────
-if mesh_objects:
-    inf = float('inf')
-    mn  = mathutils.Vector(( inf,  inf,  inf))
-    mx  = mathutils.Vector((-inf, -inf, -inf))
-    for ob in mesh_objects:
-        for corner in ob.bound_box:
-            w = ob.matrix_world @ mathutils.Vector(corner)
-            mn = mathutils.Vector((min(mn.x,w.x), min(mn.y,w.y), min(mn.z,w.z)))
-            mx = mathutils.Vector((max(mx.x,w.x), max(mx.y,w.y), max(mx.z,w.z)))
-    
-    center   = (mn + mx) / 2
-    diagonal = (mx - mn).length
-    distance = max(diagonal * 2.2, 1.5)
-    
-    cam = bpy.context.scene.camera
-    cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
-    direction    = center - cam.location
-    cam.rotation_euler = direction.to_track_quat('-Z','Y').to_euler()
-    cam.data.dof.focus_distance = distance
-    print(f"[BL] Camera auto-framed: distance={distance:.2f}, center={center}")
-
-# ── COMPOSITOR: bloom + chromatic aberration ───────────────
-scene = bpy.context.scene
-scene.use_nodes = True
-tree  = scene.node_tree
-tree.nodes.clear()
-
-rl    = tree.nodes.new("CompositorNodeRLayers"); rl.location    = (-500, 0)
-glare = tree.nodes.new("CompositorNodeGlare");   glare.location = (-200, 80)
-lens  = tree.nodes.new("CompositorNodeLensdist");lens.location  = (100, 80)
-comp  = tree.nodes.new("CompositorNodeComposite");comp.location = (400, 0)
-
-glare.glare_type = 'FOG_GLOW'
-glare.threshold  = 0.70
-glare.size       = 8
-glare.quality    = 'HIGH'
-
-lens.inputs['Distortion'].default_value  = 0.0
-lens.inputs['Dispersion'].default_value  = 0.020
-
-tree.links.new(rl.outputs['Image'],  glare.inputs['Image'])
-tree.links.new(glare.outputs['Image'], lens.inputs['Image'])
-tree.links.new(lens.outputs['Image'],  comp.inputs['Image'])
-tree.links.new(rl.outputs['Alpha'],    comp.inputs['Alpha'])
+# ── COMPOSITOR: bloom + chromatic aberration (optional) ─────
+try:
+    scene = bpy.context.scene
+    scene.use_nodes = True
+    tree  = scene.node_tree
+    tree.nodes.clear()
+    rl    = tree.nodes.new("CompositorNodeRLayers"); rl.location    = (-500, 0)
+    glare = tree.nodes.new("CompositorNodeGlare");   glare.location = (-200, 80)
+    lens  = tree.nodes.new("CompositorNodeLensdist");lens.location  = (100, 80)
+    comp  = tree.nodes.new("CompositorNodeComposite");comp.location = (400, 0)
+    try:
+        glare.glare_type = 'FOG_GLOW'
+        glare.threshold  = 0.70
+        glare.size       = 8
+        glare.quality    = 'HIGH'
+    except:
+        pass
+    try:
+        if 'Distortion' in lens.inputs:
+            lens.inputs['Distortion'].default_value  = 0.0
+        if 'Dispersion' in lens.inputs:
+            lens.inputs['Dispersion'].default_value  = 0.020
+    except:
+        pass
+    tree.links.new(rl.outputs['Image'],  glare.inputs['Image'])
+    tree.links.new(glare.outputs['Image'], lens.inputs['Image'])
+    tree.links.new(lens.outputs['Image'],  comp.inputs['Image'])
+    if 'Alpha' in rl.outputs and 'Alpha' in comp.inputs:
+        tree.links.new(rl.outputs['Alpha'], comp.inputs['Alpha'])
+except Exception as _e:
+    print(f"[BL] compositor warn: {_e}")
 
 print("[BL] Post-pass complete ✅")
 # ══════════════════════════════════════════════════
@@ -371,91 +564,123 @@ SPLINE_PALETTE = [
     (0.95, 0.45, 0.05),   # amber
 ]
 
-mesh_objects = [o for o in bpy.data.objects 
+mesh_objects = [o for o in bpy.data.objects
                 if o.type == 'MESH' and not o.name.startswith('_')]
 
 for idx, obj in enumerate(mesh_objects):
-    # ── Ensure material exists ──
-    if obj.data.materials:
-        mat = obj.data.materials[0]
-    else:
-        mat = bpy.data.materials.new(f"BL_Mat_{idx}")
-        mat.use_nodes = True
-        obj.data.materials.append(mat)
-    
-    mat.use_nodes = True
-    nodes = mat.node_tree.nodes
-    bsdf  = nodes.get("Principled BSDF")
-    if not bsdf:
-        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
-    
-    # ── Color: only override if still default grey ──
-    col = bsdf.inputs['Base Color'].default_value
-    is_grey = (abs(col[0]-0.8)<0.08 and abs(col[1]-0.8)<0.08 and abs(col[2]-0.8)<0.08)
-    if is_grey:
-        r,g,b = SPLINE_PALETTE[idx % len(SPLINE_PALETTE)]
-        bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
-    
-    # ── Spline PBR signature ──
-    bsdf.inputs['Roughness'].default_value = 0.18
-    if 'Specular IOR Level' in bsdf.inputs:
-        bsdf.inputs['Specular IOR Level'].default_value = 0.85
-    if 'Coat Weight' in bsdf.inputs:
-        bsdf.inputs['Coat Weight'].default_value    = 0.55
-        bsdf.inputs['Coat Roughness'].default_value = 0.05
-    if 'Sheen Weight' in bsdf.inputs:
-        bsdf.inputs['Sheen Weight'].default_value   = 0.04
-    
-    # ── Smooth shading ──
-    for poly in obj.data.polygons:
-        poly.use_smooth = True
-    obj.data.update()
+    try:
+        if obj.data.materials:
+            mat = obj.data.materials[0]
+        else:
+            mat = bpy.data.materials.new(f"BL_Mat_{idx}")
+            try:
+                if not mat.use_nodes:
+                    mat.use_nodes = True
+            except:
+                pass
+            obj.data.materials.append(mat)
+        try:
+            if not mat.use_nodes:
+                mat.use_nodes = True
+        except:
+            pass
+        nodes = mat.node_tree.nodes
+        bsdf  = nodes.get("Principled BSDF")
+        if not bsdf:
+            bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        try:
+            if 'Base Color' in bsdf.inputs:
+                col = bsdf.inputs['Base Color'].default_value
+                is_grey = (abs(col[0]-0.8)<0.08 and abs(col[1]-0.8)<0.08 and abs(col[2]-0.8)<0.08)
+                if is_grey:
+                    r,g,b = SPLINE_PALETTE[idx % len(SPLINE_PALETTE)]
+                    bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
+        except Exception as _e:
+            print(f"[BL] color warn {obj.name}: {_e}")
+        try:
+            if 'Roughness' in bsdf.inputs:
+                bsdf.inputs['Roughness'].default_value = 0.18
+            if 'Specular IOR Level' in bsdf.inputs:
+                bsdf.inputs['Specular IOR Level'].default_value = 0.85
+            if 'Coat Weight' in bsdf.inputs:
+                bsdf.inputs['Coat Weight'].default_value    = 0.55
+                bsdf.inputs['Coat Roughness'].default_value = 0.05
+            if 'Sheen Weight' in bsdf.inputs:
+                bsdf.inputs['Sheen Weight'].default_value   = 0.04
+        except Exception as _e:
+            print(f"[BL] pbr warn {obj.name}: {_e}")
+        try:
+            for poly in obj.data.polygons:
+                poly.use_smooth = True
+            obj.data.update()
+        except:
+            pass
+    except Exception as _e:
+        print(f"[BL] material warn {obj.name}: {_e}")
 
-# ── AUTO-FRAME CAMERA ──────────────────────────────────────
-if mesh_objects:
-    inf = float('inf')
-    mn  = mathutils.Vector(( inf,  inf,  inf))
-    mx  = mathutils.Vector((-inf, -inf, -inf))
-    for ob in mesh_objects:
-        for corner in ob.bound_box:
-            w = ob.matrix_world @ mathutils.Vector(corner)
-            mn = mathutils.Vector((min(mn.x,w.x), min(mn.y,w.y), min(mn.z,w.z)))
-            mx = mathutils.Vector((max(mx.x,w.x), max(mx.y,w.y), max(mx.z,w.z)))
-    
-    center   = (mn + mx) / 2
-    diagonal = (mx - mn).length
-    distance = max(diagonal * 2.2, 1.5)
-    
-    cam = bpy.context.scene.camera
-    cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
-    direction    = center - cam.location
-    cam.rotation_euler = direction.to_track_quat('-Z','Y').to_euler()
-    cam.data.dof.focus_distance = distance
-    print(f"[BL] Camera auto-framed: distance={distance:.2f}, center={center}")
+# ── AUTO-FRAME CAMERA (creates one if missing) ─────────────
+try:
+    if mesh_objects:
+        inf = float('inf')
+        mn  = mathutils.Vector(( inf,  inf,  inf))
+        mx  = mathutils.Vector((-inf, -inf, -inf))
+        for ob in mesh_objects:
+            for corner in ob.bound_box:
+                w = ob.matrix_world @ mathutils.Vector(corner)
+                mn = mathutils.Vector((min(mn.x,w.x), min(mn.y,w.y), min(mn.z,w.z)))
+                mx = mathutils.Vector((max(mx.x,w.x), max(mx.y,w.y), max(mx.z,w.z)))
+        center   = (mn + mx) / 2
+        diagonal = (mx - mn).length
+        distance = max(diagonal * 2.2, 1.5)
+        cam = bpy.context.scene.camera
+        if cam is None:
+            _cd = bpy.data.cameras.new("BL_Cam_Fix")
+            cam = bpy.data.objects.new("BL_Cam_Fix", _cd)
+            bpy.context.scene.collection.objects.link(cam)
+            bpy.context.scene.camera = cam
+            print("[BL] created missing camera in cinematic post-pass")
+        cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
+        direction    = center - cam.location
+        cam.rotation_euler = direction.to_track_quat('-Z','Y').to_euler()
+        try:
+            cam.data.dof.focus_distance = distance
+        except:
+            pass
+        print(f"[BL] Camera auto-framed: distance={distance:.2f}, center={center}")
+except Exception as _e:
+    print(f"[BL] frame warn: {_e}")
 
-# ── COMPOSITOR: bloom + chromatic aberration ───────────────
-scene = bpy.context.scene
-scene.use_nodes = True
-tree  = scene.node_tree
-tree.nodes.clear()
-
-rl    = tree.nodes.new("CompositorNodeRLayers"); rl.location    = (-500, 0)
-glare = tree.nodes.new("CompositorNodeGlare");   glare.location = (-200, 80)
-lens  = tree.nodes.new("CompositorNodeLensdist");lens.location  = (100, 80)
-comp  = tree.nodes.new("CompositorNodeComposite");comp.location = (400, 0)
-
-glare.glare_type = 'FOG_GLOW'
-glare.threshold  = 0.70
-glare.size       = 8
-glare.quality    = 'HIGH'
-
-lens.inputs['Distortion'].default_value  = 0.0
-lens.inputs['Dispersion'].default_value  = 0.020
-
-tree.links.new(rl.outputs['Image'],  glare.inputs['Image'])
-tree.links.new(glare.outputs['Image'], lens.inputs['Image'])
-tree.links.new(lens.outputs['Image'],  comp.inputs['Image'])
-tree.links.new(rl.outputs['Alpha'],    comp.inputs['Alpha'])
+# ── COMPOSITOR (optional) ──────────────────────────────────
+try:
+    scene = bpy.context.scene
+    scene.use_nodes = True
+    tree  = scene.node_tree
+    tree.nodes.clear()
+    rl    = tree.nodes.new("CompositorNodeRLayers"); rl.location    = (-500, 0)
+    glare = tree.nodes.new("CompositorNodeGlare");   glare.location = (-200, 80)
+    lens  = tree.nodes.new("CompositorNodeLensdist");lens.location  = (100, 80)
+    comp  = tree.nodes.new("CompositorNodeComposite");comp.location = (400, 0)
+    try:
+        glare.glare_type = 'FOG_GLOW'
+        glare.threshold  = 0.70
+        glare.size       = 8
+        glare.quality    = 'HIGH'
+    except:
+        pass
+    try:
+        if 'Distortion' in lens.inputs:
+            lens.inputs['Distortion'].default_value  = 0.0
+        if 'Dispersion' in lens.inputs:
+            lens.inputs['Dispersion'].default_value  = 0.020
+    except:
+        pass
+    tree.links.new(rl.outputs['Image'],  glare.inputs['Image'])
+    tree.links.new(glare.outputs['Image'], lens.inputs['Image'])
+    tree.links.new(lens.outputs['Image'],  comp.inputs['Image'])
+    if 'Alpha' in rl.outputs and 'Alpha' in comp.inputs:
+        tree.links.new(rl.outputs['Alpha'], comp.inputs['Alpha'])
+except Exception as _e:
+    print(f"[BL] compositor warn: {_e}")
 
 print("[BL] Cinematic post-pass complete ✅")
 # ══════════════════════════════════════════════════
@@ -464,6 +689,23 @@ print("[BL] Cinematic post-pass complete ✅")
 
 function indentPython(code) {
   return String(code || '').split('\n').map(l => (l.trim() === '' ? '' : `    ${l}`)).join('\n');
+}
+
+// Warn (in GitHub logs) when a user script contains calls the worker already
+// handles. These don't fail the job, but they are the #1 cause of "MESHES=0"
+// confusion (e.g. own export with use_selection=True exporting nothing).
+function scanUserScript(userScript) {
+  const patterns = [
+    [/bpy\.ops\.export/i, 'own export call (worker exports automatically — remove bpy.ops.export_*)'],
+    [/bpy\.ops\.render\.render/i, 'own render call (worker renders preview automatically)'],
+    [/render\.engine\s*=/i, 'render-engine override (worker sets engine version-safely)'],
+    [/sys\.exit|os\._exit|quit\(|bpy\.ops\.wm\.quit/i, 'exit/quit call (kills the job before export)'],
+    [/bpy\.ops\.wm\.read/i, 'scene reload (wipes preamble camera/lighting)'],
+    [/--output-dir|argparse/i, 'CLI-arg parsing (runner calls blender without extra args)'],
+  ];
+  for (const [re, msg] of patterns) {
+    if (re.test(userScript)) console.log(`[BL] USER_WARN: script contains ${msg}`);
+  }
 }
 
 function buildScript(userScript, outFile, fmt, quality = 'standard') {
@@ -585,10 +827,24 @@ except Exception as e:
     print(f"EXPORT_ERR: {e}")
     sys.exit(1)
 
-# 7. Preview render (defensive: missing preview must not fail the job)
+# 7. Preview render (defensive: missing preview must not fail the job).
+# Ensures a camera exists FIRST so we never hit "Cannot render, no camera"
+# (that operator error is what previously forced Blender to exit code 1
+# even though the GLB had already exported fine).
 print("[BL] PREVIEW")
 sys.stdout.flush()
 try:
+    if bpy.context.scene.camera is None:
+        try:
+            _pcd = bpy.data.cameras.new("BL_PreviewCam")
+            _pco = bpy.data.objects.new("BL_PreviewCam", _pcd)
+            bpy.context.scene.collection.objects.link(_pco)
+            bpy.context.scene.camera = _pco
+            _pco.location = (0, -6, 2)
+            _pco.rotation_euler = (math.radians(75), 0, 0)
+            print("[BL] preview: created missing camera")
+        except Exception as _e:
+            print(f"[BL] preview cam warn: {_e}")
     preview_file = '${previewFile}'
     bpy.context.scene.render.filepath = preview_file
     bpy.context.scene.render.image_settings.file_format = 'PNG'
@@ -609,19 +865,22 @@ sys.stdout.flush()
 async function runBlenderScript(scriptPath, fmt) {
   const cmd = `blender --background --python "${scriptPath}" 2>&1`;
   const opts = { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 };
-  
+
   try {
     const output = execSync(cmd, opts);
     console.log(`--- Blender ${fmt} STDOUT ---\n${output.slice(-3000)}\n--- END ---`);
     return { success: true, output };
   } catch (e) {
-    const out = e.stdout || '';
-    const err = e.stderr || '';
-    console.log(`--- Blender ${fmt} FAIL (code=${e.status}) ---`);
-    console.log(`STDOUT:\n${out.slice(-2000)}`);
-    if (err) console.log(`STDERR:\n${err.slice(-2000)}`);
+    // NOTE: Blender can exit non-zero even when the GLB exported fine
+    // (e.g. an operator reports "Cannot render, no camera" for the optional
+    // preview). Callers MUST judge by file existence/size, not exit code.
+    const out = (e.stdout != null ? String(e.stdout) : '') || '';
+    const err = (e.stderr != null ? String(e.stderr) : '') || '';
+    const combined = out || err;
+    console.log(`--- Blender ${fmt} EXIT code=${e.status} (judge by file, not code) ---`);
+    console.log(`STDOUT:\n${combined.slice(-3000)}`);
     console.log(`--- END ---`);
-    return { success: false, output: out, error: (err || out).slice(-500) };
+    return { success: false, output: combined, error: combined.slice(-800) };
   }
 }
 
@@ -673,6 +932,7 @@ async function processJob(job) {
 
   const outputs = {};
   let success = 0;
+  let lastLogTail = '';
   const quality = job.quality || 'standard';
 
   try {
@@ -684,19 +944,29 @@ async function processJob(job) {
 
       const outFile = path.join(workDir, `output.${fmt}`);
       const scriptPath = path.join(workDir, `export_${fmt}.py`);
+      scanUserScript(job.script || '');
       fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt, quality));
 
       console.log(`[BL] Running for ${fmt}...`);
       const result = await runBlenderScript(scriptPath, fmt);
 
-      if (result.success && fs.existsSync(outFile) && fs.statSync(outFile).size > 100) {
+      // File-based success: Blender's exit code is unreliable (preview
+      // warnings like "no camera" can force exit 1 after a good export).
+      const fileExists = fs.existsSync(outFile);
+      const fileSize = fileExists ? fs.statSync(outFile).size : 0;
+      if (fileExists) console.log(`[BL] ${fmt} file check: exists, size=${fileSize}`);
+      if (!result.success) console.log(`[BL] ${fmt} blender exit != 0 but continuing to file check`);
+
+      if (fileExists && fileSize > 100) {
         const key = `jobs/${job.id}/output.${fmt}`;
         const url = await uploadToR2(key, outFile, getContentType(fmt));
-        outputs[fmt] = { url, size: fs.statSync(outFile).size };
-        console.log(`✅ ${fmt} → ${url} (${fs.statSync(outFile).size} bytes)`);
+        outputs[fmt] = { url, size: fileSize };
+        console.log(`✅ ${fmt} → ${url} (${fileSize} bytes)`);
         success++;
       } else {
-        console.error(`❌ ${fmt} export failed`);
+        console.error(`❌ ${fmt} export failed (exists=${fileExists}, size=${fileSize})`);
+        // Keep the tail for the job document's error field (don't pollute outputs).
+        lastLogTail = (result.output || result.error || '').slice(-800);
         if (result.error) {
           console.error(`   Error: ${result.error}`);
         }
@@ -716,7 +986,7 @@ async function processJob(job) {
       status: success > 0 ? 'done' : 'failed',
       outputs,
       completedAt: Date.now(),
-      error: success === 0 ? 'All exports failed' : null,
+      error: success === 0 ? (`All exports failed${lastLogTail ? ` — ${lastLogTail}` : ''}`.slice(0, 1500)) : null,
     });
     console.log(`✨ Job ${job.id} → ${success > 0 ? 'done' : 'failed'} (${success}/${job.formats.length})`);
 
