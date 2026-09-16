@@ -179,7 +179,7 @@ for mod in ['io_scene_gltf2', 'io_scene_fbx', 'io_mesh_stl']:
         bpy.ops.preferences.addon_enable(module=mod)
     except: pass
 
-${indentPython(ASSET_PRELUDE)}
+${ASSET_PRELUDE.trim()}
 
 # 1. Run user script (wrapped in try/except so fallback can still fire if user code fails)
 print("[BL] USER_SCRIPT")
@@ -193,7 +193,7 @@ except Exception as _e:
 sys.stdout.flush()
 
 # 2. Collect meshes and create fallback if needed
-${indentPython(ASSET_POSTLUDE)}
+${ASSET_POSTLUDE.trim()}
 
 # 3. Export (runs unconditionally OUTSIDE the user try/except)
 os.makedirs('${outDir}', exist_ok=True)
@@ -260,7 +260,7 @@ async function processJob(job) {
   const runnerRef = db.collection('system').doc('runner');
   
   await ref.update({ status: 'processing', startedAt: Date.now() });
-  console.log(`▶ Job ${job.id}`);
+  console.log(`[worker] job ${job.id}`);
 
   await runnerRef.update({ lastActive: Date.now() });
 
@@ -274,7 +274,7 @@ async function processJob(job) {
   try {
     for (const fmt of job.formats) {
       if (!EXPORT_CMD[fmt]) { 
-        console.log(`⏭ Skipping unsupported: ${fmt}`); 
+        console.log(`[worker] skipping unsupported format: ${fmt}`); 
         continue; 
       }
 
