@@ -6,7 +6,7 @@ import type { RunnerInfo } from './types';
  * Firestore keeps the last status ('ready'/'active') forever. Every UI and
  * wake decision must go through here instead of trusting `status` alone.
  *
- * Without this, a failed run (e.g. Actions #109) shows as 🟢 READY with a
+ * Without this, a failed run (e.g. Actions #109) shows as READY with a
  * live window countdown even though nothing is running.
  */
 export const RUNNER_QUIET_MS = 120_000; // 4 missed heartbeats = dead

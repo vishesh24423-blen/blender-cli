@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
         });
 
         const jobId = jobRef.id;
-        console.log(`📝 Job created: ${jobId} (${formats.join(", ")})`);
+        console.log(`[submit] job created: ${jobId} (${formats.join(", ")})`);
 
         // 2. Check and activate runner
         let runnerStatus = 'unknown';
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
                 if (needsWake) {
                     workflowTriggered = true;
                     runnerStatus = 'starting';
-                    console.log(`🔴 Waking runner: status=${currentStatus}, stale=${isStale}`);
+                    console.log(`[submit] waking runner: status=${currentStatus}, stale=${isStale}`);
                     
                     transaction.set(runnerDocRef, {
                         status: 'starting',
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
                     }, { merge: true });
                 } else {
                     runnerStatus = currentStatus;
-                    console.log(`🟢 Runner ${currentStatus}, job queued`);
+                    console.log(`[submit] runner ${currentStatus}, job queued`);
                 }
             });
 
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
                 const githubRepo = process.env.GITHUB_REPO;
 
                 if (!githubToken || !githubOwner || !githubRepo) {
-                    console.error(`❌ Missing GitHub env vars: TOKEN=${!!githubToken}, OWNER=${!!githubOwner}, REPO=${!!githubRepo}`);
+                    console.error(`[submit] missing GitHub env vars: TOKEN=${!!githubToken}, OWNER=${!!githubOwner}, REPO=${!!githubRepo}`);
                     await runnerDocRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
                     runnerStatus = 'error';
                 } else {
@@ -132,22 +132,22 @@ export async function POST(request: NextRequest) {
                         });
 
                         if (dispatchRes.ok) {
-                            console.log(`✅ Workflow dispatched for job ${jobId}`);
+                            console.log(`[submit] workflow dispatched for job ${jobId}`);
                         } else {
                             const errorText = await dispatchRes.text();
-                            console.error(`⚠️ Failed to dispatch workflow: ${dispatchRes.status} ${errorText}`);
+                            console.error(`[submit] workflow dispatch failed: ${dispatchRes.status} ${errorText}`);
                             await runnerDocRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
                             runnerStatus = 'inactive';
                         }
                     } catch (ghError) {
-                        console.error('⚠️ GitHub dispatch error:', ghError);
+                        console.error('[submit] GitHub dispatch error:', ghError);
                         await runnerDocRef.set({ status: 'inactive', lastActive: Date.now() }, { merge: true });
                         runnerStatus = 'inactive';
                     }
                 }
             }
         } catch (runnerCheckError) {
-            console.error('⚠️ Runner check failed:', runnerCheckError);
+            console.error('[submit] runner check failed:', runnerCheckError);
         }
 
         return NextResponse.json({ jobId, runnerStatus }, { status: 201 });

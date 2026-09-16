@@ -60,7 +60,7 @@ export default function RunnerStatus() {
 
     // Liveness beats status: a crashed/failed Actions run stops the 30s
     // heartbeat, leaving Firestore frozen at 'ready'. Without this check a
-    // dead run shows 🟢 READY with a live countdown (that's what happened
+    // dead run shows READY with a live countdown (that's what happened
     // with the failed run while the badge still said READY).
     // Re-evaluated every second via the countdown tick below.
     const alive = isRunnerAlive(runner);
@@ -86,18 +86,10 @@ export default function RunnerStatus() {
             }`} />
             <div className="runner-info">
                 <div className="runner-headline">
-                    {isActive && (
-                        <><span className="runner-emoji">🟢</span><span className="runner-label">Processing...</span></>
-                    )}
-                    {isReady && (
-                        <><span className="runner-emoji">🟢</span><span className="runner-label">Runner READY</span></>
-                    )}
-                    {isStarting && (
-                        <><span className="runner-emoji">🟡</span><span className="runner-label">Runner STARTING</span></>
-                    )}
-                    {isInactive && (
-                        <><span className="runner-emoji">⚪</span><span className="runner-label">Runner IDLE</span></>
-                    )}
+                    {isActive && <span className="runner-label">Processing</span>}
+                    {isReady && <span className="runner-label">Runner ready</span>}
+                    {isStarting && <span className="runner-label">Runner starting</span>}
+                    {isInactive && <span className="runner-label">Runner idle</span>}
                 </div>
 
                 {/* GitHub Actions status */}

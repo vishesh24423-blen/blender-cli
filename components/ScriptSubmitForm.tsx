@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Sparkles, AlertTriangle } from 'lucide-react';
+import { Check, ArrowRight, AlertTriangle, Zap, Layers, Clapperboard } from 'lucide-react';
 import type { OutputFormat } from '@/lib/types';
 
 const FORMATS: { id: OutputFormat; label: string }[] = [
@@ -131,9 +131,9 @@ export default function ScriptSubmitForm() {
                             onClick={() => setQuality(q)}
                             className={`quality-chip ${quality === q ? 'quality-chip--active' : ''}`}
                         >
-                            {q === 'draft'     && '⚡'}
-                            {q === 'standard'  && '✦'}
-                            {q === 'cinematic' && '◈'}
+                            {q === 'draft'     && <Zap size={13} />}
+                            {q === 'standard'  && <Layers size={13} />}
+                            {q === 'cinematic' && <Clapperboard size={13} />}
                             {' '}
                             {q.charAt(0).toUpperCase() + q.slice(1)}
                         </button>
@@ -214,7 +214,7 @@ export default function ScriptSubmitForm() {
                     <><span className="submit-spinner" /> Opening job page...</>
                 )}
                 {phase === 'idle' && (
-                    <><Sparkles size={16} /> Generate 3D Assets</>
+                    <><ArrowRight size={16} /> Generate 3D Assets</>
                 )}
             </button>
 

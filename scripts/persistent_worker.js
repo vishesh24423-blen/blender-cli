@@ -296,10 +296,10 @@ async function processJob(job) {
         const key = `jobs/${job.id}/output.${fmt}`;
         const url = await uploadToR2(key, outFile, getContentType(fmt));
         outputs[fmt] = { url, size: fileSize };
-        console.log(`✅ ${fmt} → ${url} (${fileSize} bytes)`);
+        console.log(`[worker] ${fmt} uploaded: ${url} (${fileSize} bytes)`);
         success++;
       } else {
-        console.error(`❌ ${fmt} export failed (exists=${fileExists}, size=${fileSize})`);
+        console.error(`[worker] ${fmt} export failed (exists=${fileExists}, size=${fileSize})`);
         lastLogTail = (result.output || result.error || '').slice(-800);
         if (result.error) {
           console.error(`   Error: ${result.error}`);
@@ -313,7 +313,7 @@ async function processJob(job) {
       completedAt: Date.now(),
       error: success === 0 ? (`All exports failed${lastLogTail ? ` — ${lastLogTail}` : ''}`.slice(0, 1500)) : null,
     });
-    console.log(`✨ Job ${job.id} → ${success > 0 ? 'done' : 'failed'} (${success}/${job.formats.length})`);
+    console.log(`[worker] job ${job.id}: ${success > 0 ? 'done' : 'failed'} (${success}/${job.formats.length})`);
 
   } catch (err) {
     console.error(`Job crashed:`, err);
@@ -342,7 +342,7 @@ function installCrashHandlers() {
   if (_crashHandlerInstalled) return;
   _crashHandlerInstalled = true;
   const shutdown = async (reason, err) => {
-    console.error(`💥 Worker crashing (${reason}):`, err);
+    console.error(`[worker] crashing (${reason}):`, err);
     try {
       await markRunner('inactive', { note: `crashed: ${String((err && err.message) || err).slice(0, 300)}` });
     } catch (e) {
@@ -387,7 +387,7 @@ async function processNextQueuedJob(runnerRef, isProcessingRef, jobCountRef, hea
 
   // Check window expiry
   if (Date.now() - startTime >= WINDOW_MS) {
-    console.log(`🛑 Window closed. Processed ${jobCountRef.current} jobs.`);
+    console.log(`[worker] window closed, processed ${jobCountRef.current} jobs`);
     clearInterval(heartbeatInterval);
     await markRunner('inactive');
     process.exit(0);
@@ -438,12 +438,12 @@ except Exception as e:
   try {
     execSync(`blender --background --factory-startup --python "${testScript}" 2>&1`, { encoding: 'utf-8', timeout: 60000 });
     const size = fs.statSync(testFile).size;
-    console.log(`✅ Pre-flight test: GLB export works (${size} bytes)`);
+    console.log(`[worker] pre-flight GLB export ok (${size} bytes)`);
     fs.rmSync(testDir, { recursive: true, force: true });
     return true;
   } catch (e) {
     const out = e.stdout || '';
-    console.error(`❌ Pre-flight test FAILED:\n${out.slice(-1000)}`);
+    console.error(`[worker] pre-flight FAILED:\n${out.slice(-1000)}`);
     fs.rmSync(testDir, { recursive: true, force: true });
     return false;
   }
@@ -454,8 +454,8 @@ async function main() {
   const runnerRef = db.collection('system').doc('runner');
   const now = Date.now();
 
-  console.log(`🚀 Worker started. Window: ${WINDOW_MS / 60000}min`);
-  console.log(`📊 Setting runner to STARTING...`);
+  console.log(`[worker] started, window: ${WINDOW_MS / 60000}min`);
+  console.log(`[worker] runner -> STARTING`);
 
   // Mark runner as starting (waking up)
   await markRunner('starting', {
@@ -469,9 +469,9 @@ async function main() {
   // Verify Blender is available
   try {
     const version = execSync('blender --version', { encoding: 'utf-8', timeout: 10000 });
-    console.log(`✅ Blender: ${version.split('\n')[0]}`);
+    console.log(`[worker] blender: ${version.split('\n')[0]}`);
   } catch (e) {
-    console.error('❌ Blender not found:', e.message);
+    console.error('[worker] blender not found:', e.message);
     await markRunner('inactive');
     process.exit(1);
   }
@@ -479,12 +479,12 @@ async function main() {
   // Pre-flight test — make sure GLB export actually works
   const exportOk = await testBlenderExport();
   if (!exportOk) {
-    console.error('❌ Pre-flight export test failed — will still attempt jobs but expect failures');
+    console.error('[worker] pre-flight failed, continuing anyway');
   }
 
   // Mark runner as ready — can now accept jobs
   await markRunner('ready', { readyAt: Date.now() });
-  console.log(`✅ Runner is READY — listening for queued jobs`);
+  console.log(`[worker] runner READY, listening for queued jobs`);
 
   let jobCountRef = { current: 0 };
   let isProcessingRef = { current: false };

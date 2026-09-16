@@ -25,7 +25,7 @@ cube.data.materials.append(mat)
 
 bpy.context.view_layer.objects.active = cube
 bpy.ops.object.shade_smooth()
-print("✅ Cube created")`,
+print("Cube created")`,
   },
   {
     name: 'Array of Objects',
@@ -42,7 +42,7 @@ for i in range(12):
     bpy.context.view_layer.objects.active = sphere
     bpy.ops.object.shade_smooth()
 
-print("✅ Created 12 spheres")`,
+print("Created 12 spheres")`,
   },
   {
     name: 'Custom Material',
@@ -76,7 +76,7 @@ if 'Scale' in texture.inputs:
 sphere.data.materials.append(mat)
 bpy.context.view_layer.objects.active = sphere
 bpy.ops.object.shade_smooth()
-print("✅ Sphere with procedural material")`,
+print("Sphere with procedural material")`,
   },
   {
     name: 'Modifier Stack',
@@ -99,7 +99,7 @@ array.relative_offset_displace[0] = 2.5
 
 bpy.context.view_layer.objects.active = obj
 bpy.ops.object.shade_smooth()
-print("✅ Cylinder with modifiers")`,
+print("Cylinder with modifiers")`,
   },
 ];
 
@@ -158,16 +158,16 @@ export default function ScriptGuidePage() {
 
             {/* WHICH SCRIPTS WORK */}
             <section className="guide-section">
-              <h2 className="guide-section-title guide-section-title--success">✅ Which Python scripts work?</h2>
+              <h2 className="guide-section-title guide-section-title--success">Which scripts work</h2>
               <div className="guide-tip guide-tip--success">
                 <p><strong>Any script that creates meshes and stops.</strong> The worker wraps your code as: clear scene → preamble (camera + HDRI) → <em>your script</em> → post-pass → export → preview. If your code leaves ≥1 MESH object behind, it exports.</p>
               </div>
               <div className="guide-grid">
                 {[
-                  { title: '✅ bpy.ops primitives', code: `bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))\ncube = bpy.context.active_object\ncube.name = "MyCube"`, reason: 'Most reliable' },
-                  { title: '✅ from_pydata', code: `mesh = bpy.data.meshes.new("M")\nmesh.from_pydata(verts, [], faces)\nmesh.update()\nobj = bpy.data.objects.new("Obj", mesh)\nbpy.context.scene.collection.objects.link(obj)`, reason: 'Fully supported' },
-                  { title: '✅ bmesh', code: `import bmesh\nbm = bmesh.new()\n# ... build verts/faces ...\nmesh = bpy.data.meshes.new("M")\nbm.to_mesh(mesh)\nbm.free()\nobj = bpy.data.objects.new("Obj", mesh)\nbpy.context.scene.collection.objects.link(obj)`, reason: 'Must link object' },
-                  { title: '✅ Modifiers + materials', code: `cube.modifiers.new("Subdiv", 'SUBSURF')\nmat = bpy.data.materials.new("M")\nif not mat.use_nodes:\n    mat.use_nodes = True  # Blender 6.0 deprecates unconditional set`, reason: 'Guard socket names' },
+                  { title: 'bpy.ops primitives', code: `bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))\ncube = bpy.context.active_object\ncube.name = "MyCube"`, reason: 'Most reliable' },
+                  { title: 'from_pydata', code: `mesh = bpy.data.meshes.new("M")\nmesh.from_pydata(verts, [], faces)\nmesh.update()\nobj = bpy.data.objects.new("Obj", mesh)\nbpy.context.scene.collection.objects.link(obj)`, reason: 'Fully supported' },
+                  { title: 'bmesh', code: `import bmesh\nbm = bmesh.new()\n# ... build verts/faces ...\nmesh = bpy.data.meshes.new("M")\nbm.to_mesh(mesh)\nbm.free()\nobj = bpy.data.objects.new("Obj", mesh)\nbpy.context.scene.collection.objects.link(obj)`, reason: 'Must link object' },
+                  { title: 'Modifiers + materials', code: `cube.modifiers.new("Subdiv", 'SUBSURF')\nmat = bpy.data.materials.new("M")\nif not mat.use_nodes:\n    mat.use_nodes = True  # Blender 6.0 deprecates unconditional set`, reason: 'Guard socket names' },
                 ].map((item, idx) => (
                   <div key={idx} className="guide-card">
                     <div className="guide-card-header">
@@ -184,7 +184,7 @@ export default function ScriptGuidePage() {
 
             {/* DON'T */}
             <section className="guide-section">
-              <h2 className="guide-section-title guide-section-title--danger">❌ DON&apos;T Include (breaks jobs)</h2>
+              <h2 className="guide-section-title guide-section-title--danger">Don&apos;t include (breaks jobs)</h2>
               <div className="guide-grid">
                 {[
                   { title: 'Own export', code: `bpy.ops.export_scene.gltf(filepath=..., export_format='GLB')`, reason: 'Worker exports — yours exports nothing (esp. use_selection=True with no selection)' },
