@@ -88,604 +88,52 @@ if not exported:
   usd: (f) => `bpy.ops.wm.usd_export(filepath='${f}')`,
 };
 
-const QUALITY_PREAMBLE = {
-  // Draft is intentionally minimal but MUST still leave a camera behind,
-  // otherwise the preview render always fails with "no camera".
-  // Fully version-safe: works on Blender 4.x (BLENDER_EEVEE_NEXT) and 5.x (BLENDER_EEVEE).
-  draft: `import bpy, os, math
-# BLENDERLAB DRAFT PREAMBLE — minimal, version-safe
-def _bl_set(obj, attr, val):
-    try:
-        if hasattr(obj, attr):
-            setattr(obj, attr, val)
-    except:
-        pass
+// ---------------------------------------------------------------------------
+// Minimal prelude — do NOT touch scene, camera, lighting, or render engine.
+// The user script is fully responsible for its own geometry.
+// ---------------------------------------------------------------------------
+const ASSET_PRELUDE = `
+import bpy, os, sys, traceback
+
+# ---- Sanity: only run if we have a scene ----
+if bpy.context.scene is None:
+    raise RuntimeError("no scene available in headless Blender")
+
+# ---- Clear default scene to give user a blank slate ----
 try:
-    bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
-except:
-    try:
-        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
-    except:
-        pass
-try:
-    if bpy.context.scene.camera is None:
-        _cd = bpy.data.cameras.new("BL_Cam")
-        _co = bpy.data.objects.new("BL_Cam", _cd)
-        bpy.context.scene.collection.objects.link(_co)
-        bpy.context.scene.camera = _co
-        _co.location = (0, -6, 2)
-        _co.rotation_euler = (math.radians(75), 0, 0)
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete(use_global=False, confirm=False)
+    print("[BL] SCENE_CLEARED")
 except Exception as _e:
-    print(f"[BL] draft cam warn: {_e}")
-print("[BL] Draft preamble complete — running user script...")
-`,
-  standard: `import bpy, os, math
-# ══════════════════════════════════════════════════
-#  BLENDERLAB QUALITY PREAMBLE — DO NOT EDIT
-# ══════════════════════════════════════════════════
-def _bl_set(obj, attr, val):
-    try:
-        if hasattr(obj, attr):
-            setattr(obj, attr, val)
-    except:
-        pass
-# 1. Render engine — version-safe (4.x: EEVEE_NEXT, 5.x: EEVEE, fallback: keep default)
-try:
-    bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
-except:
-    try:
-        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
-    except Exception as _e:
-        print(f"[BL] engine warn: {_e}")
-try:
-    _eevee = getattr(bpy.context.scene, 'eevee', None)
-    if _eevee is not None:
-        _bl_set(_eevee, 'use_gtao', True)
-        _bl_set(_eevee, 'gtao_distance', 0.4)
-        _bl_set(_eevee, 'use_bloom', True)
-        _bl_set(_eevee, 'bloom_threshold', 0.70)
-        _bl_set(_eevee, 'bloom_intensity', 0.45)
-        _bl_set(_eevee, 'bloom_radius', 6.0)
-        _bl_set(_eevee, 'use_ssr', True)
-        _bl_set(_eevee, 'ssr_quality', 0.5)
-        _bl_set(_eevee, 'use_shadow_high_bitdepth', True)
-        _bl_set(_eevee, 'shadow_cube_size', '1024')
-except Exception as _e:
-    print(f"[BL] eevee opts warn: {_e}")
+    print(f"[BL] clear warn: {_e}")
+`;
 
-# 2. Transparent background + RGBA
-bpy.context.scene.render.film_transparent = True
-bpy.context.scene.render.image_settings.color_mode = 'RGBA'
+// ---------------------------------------------------------------------------
+// Minimal postlude — collect meshes, add fallback if empty, export GLB only.
+// No camera, no HDRI, no material override, no preview render.
+// ---------------------------------------------------------------------------
+const ASSET_POSTLUDE = `
+# ---- Collect user geometry ----
+_meshes = [o for o in bpy.data.objects
+           if o.type == 'MESH' and not o.name.startswith('_')]
+print(f"[BL] MESHES={len(_meshes)}")
 
-# 3. Resolution
-bpy.context.scene.render.resolution_x          = 1920
-bpy.context.scene.render.resolution_y          = 1080
-bpy.context.scene.render.resolution_percentage = 100
+# ---- Fallback so export never produces an empty file ----
+if len(_meshes) == 0:
+    print("[BL] FALLBACK: no meshes found, creating placeholder cube")
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0))
+    _fb = bpy.context.active_object
+    _fb.name = "Placeholder_Cube"
+    _meshes = [_fb]
 
-# 4. HDRI world lighting (IBL) — isolated so a missing HDRI never kills the job
-try:
-    world = bpy.data.worlds.new("BL_World")
-    bpy.context.scene.world = world
-    try:
-        world.use_nodes = True
-    except:
-        pass
-    wn = world.node_tree.nodes
-    wl = world.node_tree.links
-    wn.clear()
-    bg      = wn.new("ShaderNodeBackground")
-    env     = wn.new("ShaderNodeTexEnvironment")
-    mapping = wn.new("ShaderNodeMapping")
-    texco   = wn.new("ShaderNodeTexCoord")
-    wo      = wn.new("ShaderNodeOutputWorld")
-    hdr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'studio_small_03_1k.hdr')
-    if os.path.exists(hdr_path):
+# ---- Make sure everything is in the view layer for export ----
+for _o in _meshes:
+    if _o.name not in bpy.context.scene.collection.objects:
         try:
-            env.image = bpy.data.images.load(hdr_path)
-            print(f"[BL] HDRI loaded: {hdr_path}")
-        except Exception as _e:
-            print(f"[BL] HDRI load warn: {_e}")
-            if 'Color' in bg.inputs:
-                bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
-    else:
-        print(f"[BL] WARNING: HDRI not found at {hdr_path}, using white world")
-        if 'Color' in bg.inputs:
-            bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
-    if 'Strength' in bg.inputs:
-        bg.inputs['Strength'].default_value = 2.0
-    wl.new(texco.outputs['Generated'], mapping.inputs['Vector'])
-    wl.new(mapping.outputs['Vector'], env.inputs['Vector'])
-    wl.new(env.outputs['Color'],      bg.inputs['Color'])
-    wl.new(bg.outputs['Background'],  wo.inputs['Surface'])
-except Exception as _e:
-    print(f"[BL] world warn: {_e}")
-
-# 5. Camera — hero shot, auto-frames after geometry is created.
-# Reuses existing camera if preamble re-runs or one already exists.
-try:
-    cam_obj = bpy.context.scene.camera
-    if cam_obj is None:
-        cam_data = bpy.data.cameras.new("BL_Cam")
-        try:
-            cam_data.lens = 85
-        except:
+            bpy.context.scene.collection.objects.link(_o)
+        except Exception:
             pass
-        try:
-            cam_data.dof.use_dof = True
-            cam_data.dof.aperture_fstop = 2.8
-        except:
-            pass
-        cam_obj = bpy.data.objects.new("BL_Cam", cam_data)
-        bpy.context.scene.collection.objects.link(cam_obj)
-        bpy.context.scene.camera = cam_obj
-        cam_obj.location       = (0, -6, 2)
-        cam_obj.rotation_euler = (math.radians(75), 0, 0)
-except Exception as _e:
-    print(f"[BL] camera warn: {_e}")
-
-# 6. Shadow catcher ground plane (optional — never fatal)
-try:
-    bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, -0.01))
-    _sc = bpy.context.active_object
-    _sc.name = "_ShadowCatcher"
-    _bl_set(_sc, 'is_shadow_catcher', True)
-    _bl_set(_sc, 'visible_diffuse', False)
-except Exception as _e:
-    print(f"[BL] shadowcatcher warn: {_e}")
-
-print("[BL] Preamble complete — running user script...")
-# ══════════════════════════════════════════════════
-`,
-  cinematic: `import bpy, os, math
-# ══════════════════════════════════════════════════
-#  BLENDERLAB CINEMATIC PREAMBLE — DO NOT EDIT
-# ══════════════════════════════════════════════════
-def _bl_set(obj, attr, val):
-    try:
-        if hasattr(obj, attr):
-            setattr(obj, attr, val)
-    except:
-        pass
-# 1. Render engine — version-safe (4.x: EEVEE_NEXT, 5.x: EEVEE)
-try:
-    bpy.context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
-except:
-    try:
-        bpy.context.scene.render.engine = 'BLENDER_EEVEE'
-    except Exception as _e:
-        print(f"[BL] engine warn: {_e}")
-try:
-    _eevee = getattr(bpy.context.scene, 'eevee', None)
-    if _eevee is not None:
-        _bl_set(_eevee, 'use_gtao', True)
-        _bl_set(_eevee, 'gtao_distance', 0.4)
-        _bl_set(_eevee, 'use_bloom', True)
-        _bl_set(_eevee, 'bloom_threshold', 0.70)
-        _bl_set(_eevee, 'bloom_intensity', 0.6)
-        _bl_set(_eevee, 'bloom_radius', 8.0)
-        _bl_set(_eevee, 'use_ssr', True)
-        _bl_set(_eevee, 'ssr_quality', 0.5)
-        _bl_set(_eevee, 'use_shadow_high_bitdepth', True)
-        _bl_set(_eevee, 'shadow_cube_size', '2048')
-        _bl_set(_eevee, 'use_volumetric_lights', True)
-        _bl_set(_eevee, 'use_volumetric_shadows', True)
-except Exception as _e:
-    print(f"[BL] eevee opts warn: {_e}")
-
-# 2. Transparent background + RGBA
-bpy.context.scene.render.film_transparent = True
-bpy.context.scene.render.image_settings.color_mode = 'RGBA'
-
-# 3. Resolution - 4K
-bpy.context.scene.render.resolution_x          = 3840
-bpy.context.scene.render.resolution_y          = 2160
-bpy.context.scene.render.resolution_percentage = 100
-
-# 4. HDRI world lighting (IBL) — isolated so a missing HDRI never kills the job
-try:
-    world = bpy.data.worlds.new("BL_World")
-    bpy.context.scene.world = world
-    try:
-        world.use_nodes = True
-    except:
-        pass
-    wn = world.node_tree.nodes
-    wl = world.node_tree.links
-    wn.clear()
-    bg      = wn.new("ShaderNodeBackground")
-    env     = wn.new("ShaderNodeTexEnvironment")
-    mapping = wn.new("ShaderNodeMapping")
-    texco   = wn.new("ShaderNodeTexCoord")
-    wo      = wn.new("ShaderNodeOutputWorld")
-    hdr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'studio_small_03_1k.hdr')
-    if os.path.exists(hdr_path):
-        try:
-            env.image = bpy.data.images.load(hdr_path)
-            print(f"[BL] HDRI loaded: {hdr_path}")
-        except Exception as _e:
-            print(f"[BL] HDRI load warn: {_e}")
-            if 'Color' in bg.inputs:
-                bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
-    else:
-        print(f"[BL] WARNING: HDRI not found at {hdr_path}, using white world")
-        if 'Color' in bg.inputs:
-            bg.inputs['Color'].default_value = (0.8, 0.8, 0.85, 1.0)
-    if 'Strength' in bg.inputs:
-        bg.inputs['Strength'].default_value = 2.0
-    wl.new(texco.outputs['Generated'], mapping.inputs['Vector'])
-    wl.new(mapping.outputs['Vector'], env.inputs['Vector'])
-    wl.new(env.outputs['Color'],      bg.inputs['Color'])
-    wl.new(bg.outputs['Background'],  wo.inputs['Surface'])
-except Exception as _e:
-    print(f"[BL] world warn: {_e}")
-
-# 5. Camera — hero shot with shallow DOF (reuses existing camera if present)
-try:
-    cam_obj = bpy.context.scene.camera
-    if cam_obj is None:
-        cam_data = bpy.data.cameras.new("BL_Cam")
-        try:
-            cam_data.lens = 85
-        except:
-            pass
-        try:
-            cam_data.dof.use_dof = True
-            cam_data.dof.aperture_fstop = 1.8
-        except:
-            pass
-        cam_obj = bpy.data.objects.new("BL_Cam", cam_data)
-        bpy.context.scene.collection.objects.link(cam_obj)
-        bpy.context.scene.camera = cam_obj
-        cam_obj.location       = (0, -6, 2)
-        cam_obj.rotation_euler = (math.radians(75), 0, 0)
-except Exception as _e:
-    print(f"[BL] camera warn: {_e}")
-
-# 6. Shadow catcher ground plane (optional — never fatal)
-try:
-    bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, -0.01))
-    _sc = bpy.context.active_object
-    _sc.name = "_ShadowCatcher"
-    _bl_set(_sc, 'is_shadow_catcher', True)
-    _bl_set(_sc, 'visible_diffuse', False)
-except Exception as _e:
-    print(f"[BL] shadowcatcher warn: {_e}")
-
-print("[BL] Cinematic preamble complete — running user script...")
-# ══════════════════════════════════════════════════
-`
-};
-
-const QUALITY_POSTPASS = {
-  // Draft post-pass: only ensure + auto-frame the camera (fast, never fails).
-  // No material overrides, no compositor — keeps draft ~30s.
-  draft: `
-# BLENDERLAB DRAFT POST-PASS — camera ensure only
-import bpy, mathutils
-print("[BL] Running draft post-pass (camera ensure)...")
-try:
-    _meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.name.startswith('_')]
-    _cam = bpy.context.scene.camera
-    if _cam is None:
-        try:
-            _cd = bpy.data.cameras.new("BL_Cam_Fix")
-            _cam = bpy.data.objects.new("BL_Cam_Fix", _cd)
-            bpy.context.scene.collection.objects.link(_cam)
-            bpy.context.scene.camera = _cam
-            print("[BL] draft: created missing camera")
-        except Exception as _e:
-            print(f"[BL] draft cam create warn: {_e}")
-            _cam = None
-    if _cam is not None and _meshes:
-        try:
-            inf = float('inf')
-            mn = mathutils.Vector((inf, inf, inf))
-            mx = mathutils.Vector((-inf, -inf, -inf))
-            for ob in _meshes:
-                for corner in ob.bound_box:
-                    w = ob.matrix_world @ mathutils.Vector(corner)
-                    mn = mathutils.Vector((min(mn.x, w.x), min(mn.y, w.y), min(mn.z, w.z)))
-                    mx = mathutils.Vector((max(mx.x, w.x), max(mx.y, w.y), max(mx.z, w.z)))
-            center = (mn + mx) / 2
-            diagonal = (mx - mn).length
-            distance = max(diagonal * 2.2, 1.5)
-            _cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
-            direction = center - _cam.location
-            _cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
-            try:
-                _cam.data.dof.focus_distance = distance
-            except:
-                pass
-            print(f"[BL] draft camera framed: distance={distance:.2f}")
-        except Exception as _e:
-            print(f"[BL] draft frame warn: {_e}")
-except Exception as _e:
-    print(f"[BL] draft postpass warn: {_e}")
-print("[BL] Draft post-pass complete")
-`,
-  standard: `
-# ══════════════════════════════════════════════════
-#  BLENDERLAB POST-PASS — DO NOT EDIT
-# ══════════════════════════════════════════════════
-import bpy, mathutils
-
-print("[BL] Running post-pass...")
-
-SPLINE_PALETTE = [
-    (0.10, 0.18, 0.95),   # electric blue
-    (0.52, 0.08, 0.95),   # deep purple
-    (0.04, 0.72, 0.88),   # cyan
-    (0.92, 0.22, 0.52),   # pink
-    (0.08, 0.88, 0.52),   # mint
-    (0.95, 0.45, 0.05),   # amber
-]
-
-mesh_objects = [o for o in bpy.data.objects
-                if o.type == 'MESH' and not o.name.startswith('_')]
-
-for idx, obj in enumerate(mesh_objects):
-    try:
-        # ── Ensure material exists (Blender 6.0: use_nodes deprecated, only set if needed) ──
-        if obj.data.materials:
-            mat = obj.data.materials[0]
-        else:
-            mat = bpy.data.materials.new(f"BL_Mat_{idx}")
-            try:
-                if not mat.use_nodes:
-                    mat.use_nodes = True
-            except:
-                pass
-            obj.data.materials.append(mat)
-        try:
-            if not mat.use_nodes:
-                mat.use_nodes = True
-        except:
-            pass
-        nodes = mat.node_tree.nodes
-        bsdf  = nodes.get("Principled BSDF")
-        if not bsdf:
-            bsdf = nodes.new("ShaderNodeBsdfPrincipled")
-        # ── Color: only override if still default grey ──
-        try:
-            if 'Base Color' in bsdf.inputs:
-                col = bsdf.inputs['Base Color'].default_value
-                is_grey = (abs(col[0]-0.8)<0.08 and abs(col[1]-0.8)<0.08 and abs(col[2]-0.8)<0.08)
-                if is_grey:
-                    r,g,b = SPLINE_PALETTE[idx % len(SPLINE_PALETTE)]
-                    bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
-        except Exception as _e:
-            print(f"[BL] color warn {obj.name}: {_e}")
-        # ── Spline PBR signature (all guarded — socket names vary by version) ──
-        try:
-            if 'Roughness' in bsdf.inputs:
-                bsdf.inputs['Roughness'].default_value = 0.18
-            if 'Specular IOR Level' in bsdf.inputs:
-                bsdf.inputs['Specular IOR Level'].default_value = 0.85
-            if 'Coat Weight' in bsdf.inputs:
-                bsdf.inputs['Coat Weight'].default_value    = 0.55
-                bsdf.inputs['Coat Roughness'].default_value = 0.05
-            if 'Sheen Weight' in bsdf.inputs:
-                bsdf.inputs['Sheen Weight'].default_value   = 0.04
-        except Exception as _e:
-            print(f"[BL] pbr warn {obj.name}: {_e}")
-        # ── Smooth shading ──
-        try:
-            for poly in obj.data.polygons:
-                poly.use_smooth = True
-            obj.data.update()
-        except:
-            pass
-    except Exception as _e:
-        print(f"[BL] material warn {obj.name}: {_e}")
-
-# ── AUTO-FRAME CAMERA (creates one if preamble failed) ──────
-try:
-    if mesh_objects:
-        inf = float('inf')
-        mn  = mathutils.Vector(( inf,  inf,  inf))
-        mx  = mathutils.Vector((-inf, -inf, -inf))
-        for ob in mesh_objects:
-            for corner in ob.bound_box:
-                w = ob.matrix_world @ mathutils.Vector(corner)
-                mn = mathutils.Vector((min(mn.x,w.x), min(mn.y,w.y), min(mn.z,w.z)))
-                mx = mathutils.Vector((max(mx.x,w.x), max(mx.y,w.y), max(mx.z,w.z)))
-        center   = (mn + mx) / 2
-        diagonal = (mx - mn).length
-        distance = max(diagonal * 2.2, 1.5)
-        cam = bpy.context.scene.camera
-        if cam is None:
-            _cd = bpy.data.cameras.new("BL_Cam_Fix")
-            cam = bpy.data.objects.new("BL_Cam_Fix", _cd)
-            bpy.context.scene.collection.objects.link(cam)
-            bpy.context.scene.camera = cam
-            print("[BL] created missing camera in post-pass")
-        cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
-        direction    = center - cam.location
-        cam.rotation_euler = direction.to_track_quat('-Z','Y').to_euler()
-        try:
-            cam.data.dof.focus_distance = distance
-        except:
-            pass
-        print(f"[BL] Camera auto-framed: distance={distance:.2f}, center={center}")
-    else:
-        print("[BL] no meshes for framing")
-except Exception as _e:
-    print(f"[BL] frame warn: {_e}")
-
-# ── COMPOSITOR: bloom + chromatic aberration (optional) ─────
-try:
-    scene = bpy.context.scene
-    scene.use_nodes = True
-    tree  = scene.node_tree
-    tree.nodes.clear()
-    rl    = tree.nodes.new("CompositorNodeRLayers"); rl.location    = (-500, 0)
-    glare = tree.nodes.new("CompositorNodeGlare");   glare.location = (-200, 80)
-    lens  = tree.nodes.new("CompositorNodeLensdist");lens.location  = (100, 80)
-    comp  = tree.nodes.new("CompositorNodeComposite");comp.location = (400, 0)
-    try:
-        glare.glare_type = 'FOG_GLOW'
-        glare.threshold  = 0.70
-        glare.size       = 8
-        glare.quality    = 'HIGH'
-    except:
-        pass
-    try:
-        if 'Distortion' in lens.inputs:
-            lens.inputs['Distortion'].default_value  = 0.0
-        if 'Dispersion' in lens.inputs:
-            lens.inputs['Dispersion'].default_value  = 0.020
-    except:
-        pass
-    tree.links.new(rl.outputs['Image'],  glare.inputs['Image'])
-    tree.links.new(glare.outputs['Image'], lens.inputs['Image'])
-    tree.links.new(lens.outputs['Image'],  comp.inputs['Image'])
-    if 'Alpha' in rl.outputs and 'Alpha' in comp.inputs:
-        tree.links.new(rl.outputs['Alpha'], comp.inputs['Alpha'])
-except Exception as _e:
-    print(f"[BL] compositor warn: {_e}")
-
-print("[BL] Post-pass complete ✅")
-# ══════════════════════════════════════════════════
-`,
-  cinematic: `
-# ══════════════════════════════════════════════════
-#  BLENDERLAB CINEMATIC POST-PASS — DO NOT EDIT
-# ══════════════════════════════════════════════════
-import bpy, mathutils
-
-print("[BL] Running cinematic post-pass...")
-
-SPLINE_PALETTE = [
-    (0.10, 0.18, 0.95),   # electric blue
-    (0.52, 0.08, 0.95),   # deep purple
-    (0.04, 0.72, 0.88),   # cyan
-    (0.92, 0.22, 0.52),   # pink
-    (0.08, 0.88, 0.52),   # mint
-    (0.95, 0.45, 0.05),   # amber
-]
-
-mesh_objects = [o for o in bpy.data.objects
-                if o.type == 'MESH' and not o.name.startswith('_')]
-
-for idx, obj in enumerate(mesh_objects):
-    try:
-        if obj.data.materials:
-            mat = obj.data.materials[0]
-        else:
-            mat = bpy.data.materials.new(f"BL_Mat_{idx}")
-            try:
-                if not mat.use_nodes:
-                    mat.use_nodes = True
-            except:
-                pass
-            obj.data.materials.append(mat)
-        try:
-            if not mat.use_nodes:
-                mat.use_nodes = True
-        except:
-            pass
-        nodes = mat.node_tree.nodes
-        bsdf  = nodes.get("Principled BSDF")
-        if not bsdf:
-            bsdf = nodes.new("ShaderNodeBsdfPrincipled")
-        try:
-            if 'Base Color' in bsdf.inputs:
-                col = bsdf.inputs['Base Color'].default_value
-                is_grey = (abs(col[0]-0.8)<0.08 and abs(col[1]-0.8)<0.08 and abs(col[2]-0.8)<0.08)
-                if is_grey:
-                    r,g,b = SPLINE_PALETTE[idx % len(SPLINE_PALETTE)]
-                    bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
-        except Exception as _e:
-            print(f"[BL] color warn {obj.name}: {_e}")
-        try:
-            if 'Roughness' in bsdf.inputs:
-                bsdf.inputs['Roughness'].default_value = 0.18
-            if 'Specular IOR Level' in bsdf.inputs:
-                bsdf.inputs['Specular IOR Level'].default_value = 0.85
-            if 'Coat Weight' in bsdf.inputs:
-                bsdf.inputs['Coat Weight'].default_value    = 0.55
-                bsdf.inputs['Coat Roughness'].default_value = 0.05
-            if 'Sheen Weight' in bsdf.inputs:
-                bsdf.inputs['Sheen Weight'].default_value   = 0.04
-        except Exception as _e:
-            print(f"[BL] pbr warn {obj.name}: {_e}")
-        try:
-            for poly in obj.data.polygons:
-                poly.use_smooth = True
-            obj.data.update()
-        except:
-            pass
-    except Exception as _e:
-        print(f"[BL] material warn {obj.name}: {_e}")
-
-# ── AUTO-FRAME CAMERA (creates one if missing) ─────────────
-try:
-    if mesh_objects:
-        inf = float('inf')
-        mn  = mathutils.Vector(( inf,  inf,  inf))
-        mx  = mathutils.Vector((-inf, -inf, -inf))
-        for ob in mesh_objects:
-            for corner in ob.bound_box:
-                w = ob.matrix_world @ mathutils.Vector(corner)
-                mn = mathutils.Vector((min(mn.x,w.x), min(mn.y,w.y), min(mn.z,w.z)))
-                mx = mathutils.Vector((max(mx.x,w.x), max(mx.y,w.y), max(mx.z,w.z)))
-        center   = (mn + mx) / 2
-        diagonal = (mx - mn).length
-        distance = max(diagonal * 2.2, 1.5)
-        cam = bpy.context.scene.camera
-        if cam is None:
-            _cd = bpy.data.cameras.new("BL_Cam_Fix")
-            cam = bpy.data.objects.new("BL_Cam_Fix", _cd)
-            bpy.context.scene.collection.objects.link(cam)
-            bpy.context.scene.camera = cam
-            print("[BL] created missing camera in cinematic post-pass")
-        cam.location = (center.x, center.y - distance, center.z + distance * 0.38)
-        direction    = center - cam.location
-        cam.rotation_euler = direction.to_track_quat('-Z','Y').to_euler()
-        try:
-            cam.data.dof.focus_distance = distance
-        except:
-            pass
-        print(f"[BL] Camera auto-framed: distance={distance:.2f}, center={center}")
-except Exception as _e:
-    print(f"[BL] frame warn: {_e}")
-
-# ── COMPOSITOR (optional) ──────────────────────────────────
-try:
-    scene = bpy.context.scene
-    scene.use_nodes = True
-    tree  = scene.node_tree
-    tree.nodes.clear()
-    rl    = tree.nodes.new("CompositorNodeRLayers"); rl.location    = (-500, 0)
-    glare = tree.nodes.new("CompositorNodeGlare");   glare.location = (-200, 80)
-    lens  = tree.nodes.new("CompositorNodeLensdist");lens.location  = (100, 80)
-    comp  = tree.nodes.new("CompositorNodeComposite");comp.location = (400, 0)
-    try:
-        glare.glare_type = 'FOG_GLOW'
-        glare.threshold  = 0.70
-        glare.size       = 8
-        glare.quality    = 'HIGH'
-    except:
-        pass
-    try:
-        if 'Distortion' in lens.inputs:
-            lens.inputs['Distortion'].default_value  = 0.0
-        if 'Dispersion' in lens.inputs:
-            lens.inputs['Dispersion'].default_value  = 0.020
-    except:
-        pass
-    tree.links.new(rl.outputs['Image'],  glare.inputs['Image'])
-    tree.links.new(glare.outputs['Image'], lens.inputs['Image'])
-    tree.links.new(lens.outputs['Image'],  comp.inputs['Image'])
-    if 'Alpha' in rl.outputs and 'Alpha' in comp.inputs:
-        tree.links.new(rl.outputs['Alpha'], comp.inputs['Alpha'])
-except Exception as _e:
-    print(f"[BL] compositor warn: {_e}")
-
-print("[BL] Cinematic post-pass complete ✅")
-# ══════════════════════════════════════════════════
-`
-};
+`;
 
 function indentPython(code) {
   return String(code || '').split('\n').map(l => (l.trim() === '' ? '' : `    ${l}`)).join('\n');
@@ -697,10 +145,10 @@ function indentPython(code) {
 function scanUserScript(userScript) {
   const patterns = [
     [/bpy\.ops\.export/i, 'own export call (worker exports automatically — remove bpy.ops.export_*)'],
-    [/bpy\.ops\.render\.render/i, 'own render call (worker renders preview automatically)'],
-    [/render\.engine\s*=/i, 'render-engine override (worker sets engine version-safely)'],
+    [/bpy\.ops\.render\.render/i, 'own render call (worker does not render)'],
+    [/render\.engine\s*=/i, 'render-engine override (not relevant for asset export)'],
     [/sys\.exit|os\._exit|quit\(|bpy\.ops\.wm\.quit/i, 'exit/quit call (kills the job before export)'],
-    [/bpy\.ops\.wm\.read/i, 'scene reload (wipes preamble camera/lighting)'],
+    [/bpy\.ops\.wm\.read/i, 'scene reload (wipes user geometry)'],
     [/--output-dir|argparse/i, 'CLI-arg parsing (runner calls blender without extra args)'],
   ];
   for (const [re, msg] of patterns) {
@@ -708,31 +156,22 @@ function scanUserScript(userScript) {
   }
 }
 
-function buildScript(userScript, outFile, fmt, quality = 'standard') {
-  const validQualities = ['draft', 'standard', 'cinematic'];
-  const q = validQualities.includes(quality) ? quality : 'standard';
-  const preamble = QUALITY_PREAMBLE[q] || '';
-  const postpass = QUALITY_POSTPASS[q] || '';
-  const indentedUser = indentPython(userScript);
-  const indentedPreamble = indentPython(preamble);
-  const indentedPostpass = indentPython(postpass);
-  const outDir = path.dirname(outFile);
-  const previewFile = path.join(outDir, 'preview.png');
-  const exportCmd = EXPORT_CMD[fmt](outFile);
-  const indentedExport = indentPython(exportCmd);
+function buildScript(userCode, outputPath, fmt = 'glb') {
+    const safeUser = indentPython(userCode);
 
-  return `
-import bpy, sys, os, traceback, math
-try:
-    import mathutils
-except: pass
+    // Optional lint — still useful, but nothing else runs around the user code.
+    scanUserScript(userCode);
 
-# ── Debug ──
+    const exportCmd = EXPORT_CMD[fmt](outputPath);
+    const indentedExport = indentPython(exportCmd);
+    const outDir = path.dirname(outputPath);
+
+    const script = `
+import bpy, os, sys, traceback
+
 print(f"[BL] blender={bpy.app.version_string}")
 print(f"[BL] python={sys.version}")
 print(f"[BL] cwd={os.getcwd()}")
-print(f"[BL] quality=${q}")
-print(f"[BL] format=${fmt}")
 
 # Enable common export addons
 for mod in ['io_scene_gltf2', 'io_scene_fbx', 'io_mesh_stl']:
@@ -740,130 +179,51 @@ for mod in ['io_scene_gltf2', 'io_scene_fbx', 'io_mesh_stl']:
         bpy.ops.preferences.addon_enable(module=mod)
     except: pass
 
-# ── Clear default scene ──
-try:
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete(use_global=False, confirm=False)
-except Exception as e:
-    print(f"[BL] clear warn: {e}")
+${indentPython(ASSET_PRELUDE)}
 
-# 1. Quality preamble (defensive: EEVEE props vary across Blender versions,
-#    so a single missing attribute must not fail the whole job)
-print("[BL] PREAMBLE")
-sys.stdout.flush()
-try:
-${indentedPreamble}
-    print("[BL] PREAMBLE_OK")
-except Exception as e:
-    traceback.print_exc()
-    print(f"[BL] PREAMBLE_WARN: {e} - continuing with defaults")
-sys.stdout.flush()
-
-# 2. Run user script
+# 1. Run user script (wrapped in try/except so fallback can still fire if user code fails)
 print("[BL] USER_SCRIPT")
 sys.stdout.flush()
 try:
-${indentedUser}
+${safeUser}
     print("[BL] USER_OK")
-except Exception as e:
+except Exception as _e:
     traceback.print_exc()
-    print(f"USER_ERROR: {e}")
-    sys.exit(1)
+    print(f"[BL] USER_ERROR: {_e}")
 sys.stdout.flush()
 
-# 3. Collect mesh objects
-meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.name.startswith('_')]
-print(f"[BL] MESHES={len(meshes)}")
-sys.stdout.flush()
+# 2. Collect meshes and create fallback if needed
+${indentPython(ASSET_POSTLUDE)}
 
-# 4. Fallback if user created nothing
-if not meshes:
-    print("[BL] FALLBACK")
-    try:
-        bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
-        bpy.context.active_object.name = "BL_Fallback"
-        meshes = [bpy.context.active_object]
-    except Exception as e:
-        print(f"FALLBACK_ERROR: {e}")
-        sys.exit(1)
-
-# 5. Smooth shading
-for o in meshes:
-    try:
-        bpy.context.view_layer.objects.active = o
-        bpy.ops.object.shade_smooth()
-    except:
-        pass
-
-# 5b. Quality post-pass (defensive: never fails the job)
-print("[BL] POSTPASS")
-sys.stdout.flush()
-try:
-${indentedPostpass}
-    print("[BL] POSTPASS_OK")
-except Exception as e:
-    traceback.print_exc()
-    print(f"[BL] POSTPASS_WARN: {e} - continuing to export")
-sys.stdout.flush()
-
-# 6. Export
-out_file = '${outFile}'
+# 3. Export (runs unconditionally OUTSIDE the user try/except)
 os.makedirs('${outDir}', exist_ok=True)
-print(f"[BL] EXPORT {out_file}")
+print(f"[BL] EXPORT ${outputPath}")
 sys.stdout.flush()
 try:
 ${indentedExport}
     print(f"[BL] VERIFY")
-    if os.path.exists(out_file):
-        sz = os.path.getsize(out_file)
+    if os.path.exists('${outputPath}'):
+        sz = os.path.getsize('${outputPath}')
         print(f"[BL] SIZE={sz}")
         if sz < 50:
             print(f"[BL] WARN: file too small ({sz} bytes)")
     else:
-        print(f"FATAL: no output at {out_file}")
+        print(f"[BL] FATAL: no output at ${outputPath}")
         sys.exit(1)
-except Exception as e:
+except Exception as _e:
     traceback.print_exc()
-    print(f"EXPORT_ERR: {e}")
+    print(f"[BL] EXPORT_ERROR: {_e}")
     sys.exit(1)
-
-# 7. Preview render (defensive: missing preview must not fail the job).
-# Ensures a camera exists FIRST so we never hit "Cannot render, no camera"
-# (that operator error is what previously forced Blender to exit code 1
-# even though the GLB had already exported fine).
-print("[BL] PREVIEW")
-sys.stdout.flush()
-try:
-    if bpy.context.scene.camera is None:
-        try:
-            _pcd = bpy.data.cameras.new("BL_PreviewCam")
-            _pco = bpy.data.objects.new("BL_PreviewCam", _pcd)
-            bpy.context.scene.collection.objects.link(_pco)
-            bpy.context.scene.camera = _pco
-            _pco.location = (0, -6, 2)
-            _pco.rotation_euler = (math.radians(75), 0, 0)
-            print("[BL] preview: created missing camera")
-        except Exception as _e:
-            print(f"[BL] preview cam warn: {_e}")
-    preview_file = '${previewFile}'
-    bpy.context.scene.render.filepath = preview_file
-    bpy.context.scene.render.image_settings.file_format = 'PNG'
-    bpy.ops.render.render(write_still=True)
-    if os.path.exists(preview_file):
-        print(f"[BL] PREVIEW_OK size={os.path.getsize(preview_file)}")
-    else:
-        print("[BL] PREVIEW_WARN: file not created")
-except Exception as e:
-    print(f"[BL] PREVIEW_WARN: {e}")
-sys.stdout.flush()
 
 print("[BL] DONE")
 sys.stdout.flush()
 `;
+
+    return script;
 }
 
 async function runBlenderScript(scriptPath, fmt) {
-  const cmd = `blender --background --python "${scriptPath}" 2>&1`;
+  const cmd = `blender --background --factory-startup --python "${scriptPath}" 2>&1`;
   const opts = { encoding: 'utf-8', timeout: 300_000, maxBuffer: 10 * 1024 * 1024 };
 
   try {
@@ -871,9 +231,6 @@ async function runBlenderScript(scriptPath, fmt) {
     console.log(`--- Blender ${fmt} STDOUT ---\n${output.slice(-3000)}\n--- END ---`);
     return { success: true, output };
   } catch (e) {
-    // NOTE: Blender can exit non-zero even when the GLB exported fine
-    // (e.g. an operator reports "Cannot render, no camera" for the optional
-    // preview). Callers MUST judge by file existence/size, not exit code.
     const out = (e.stdout != null ? String(e.stdout) : '') || '';
     const err = (e.stderr != null ? String(e.stderr) : '') || '';
     const combined = out || err;
@@ -910,30 +267,9 @@ async function processJob(job) {
   const workDir = `/tmp/job_${job.id}`;
   fs.mkdirSync(workDir, { recursive: true });
 
-  // Make HDRI available where the preamble expects it:
-  // preamble resolves <script_dir>/assets/studio_small_03_1k.hdr, and the
-  // generated script lives in workDir, so mirror the repo asset there.
-  try {
-    const repoAssets = path.join(__dirname, 'assets');
-    const workAssets = path.join(workDir, 'assets');
-    fs.mkdirSync(workAssets, { recursive: true });
-    const hdrName = 'studio_small_03_1k.hdr';
-    const src = path.join(repoAssets, hdrName);
-    const dst = path.join(workAssets, hdrName);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, dst);
-      console.log(`[BL] HDRI staged: ${dst}`);
-    } else {
-      console.log(`[BL] HDRI not in repo (${src}), preamble will use fallback world`);
-    }
-  } catch (e) {
-    console.log(`[BL] HDRI stage warn: ${e.message}`);
-  }
-
   const outputs = {};
   let success = 0;
   let lastLogTail = '';
-  const quality = job.quality || 'standard';
 
   try {
     for (const fmt of job.formats) {
@@ -945,13 +281,12 @@ async function processJob(job) {
       const outFile = path.join(workDir, `output.${fmt}`);
       const scriptPath = path.join(workDir, `export_${fmt}.py`);
       scanUserScript(job.script || '');
-      fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt, quality));
+      fs.writeFileSync(scriptPath, buildScript(job.script, outFile, fmt));
 
       console.log(`[BL] Running for ${fmt}...`);
       const result = await runBlenderScript(scriptPath, fmt);
 
-      // File-based success: Blender's exit code is unreliable (preview
-      // warnings like "no camera" can force exit 1 after a good export).
+      // File-based success: Blender's exit code is unreliable.
       const fileExists = fs.existsSync(outFile);
       const fileSize = fileExists ? fs.statSync(outFile).size : 0;
       if (fileExists) console.log(`[BL] ${fmt} file check: exists, size=${fileSize}`);
@@ -965,21 +300,11 @@ async function processJob(job) {
         success++;
       } else {
         console.error(`❌ ${fmt} export failed (exists=${fileExists}, size=${fileSize})`);
-        // Keep the tail for the job document's error field (don't pollute outputs).
         lastLogTail = (result.output || result.error || '').slice(-800);
         if (result.error) {
           console.error(`   Error: ${result.error}`);
         }
       }
-    }
-
-    // Upload preview PNG if it exists
-    const previewPath = path.join(workDir, 'preview.png');
-    if (fs.existsSync(previewPath) && fs.statSync(previewPath).size > 100) {
-      const previewKey = `jobs/${job.id}/preview.png`;
-      const url = await uploadToR2(previewKey, previewPath, 'image/png');
-      outputs.preview = url;
-      console.log(`🖼️ Preview → ${url}`);
     }
 
     await ref.update({
@@ -1111,7 +436,7 @@ except Exception as e:
 
   fs.writeFileSync(testScript, code);
   try {
-    execSync(`blender --background --python "${testScript}" 2>&1`, { encoding: 'utf-8', timeout: 60000 });
+    execSync(`blender --background --factory-startup --python "${testScript}" 2>&1`, { encoding: 'utf-8', timeout: 60000 });
     const size = fs.statSync(testFile).size;
     console.log(`✅ Pre-flight test: GLB export works (${size} bytes)`);
     fs.rmSync(testDir, { recursive: true, force: true });
