@@ -1,5 +1,6 @@
 import RunnerStatus from '@/components/RunnerStatus';
 import ScriptSubmitForm from '@/components/ScriptSubmitForm';
+import AiChat from '@/components/AiChat';
 import Link from 'next/link';
 import { Code2, Cpu, Download, CheckCircle2, Ban, Clock } from 'lucide-react';
 
@@ -42,6 +43,7 @@ export default function HomePage() {
       </section>
 
       {/* Submit Form */}
+      <AiChat />
       <ScriptSubmitForm />
 
       {/* Which scripts work — landing cheat-sheet (full guide at /guide) */}

@@ -54,6 +54,8 @@ export default function ScriptSubmitForm() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        const onAi = (e: Event) => setScript((e as CustomEvent<string>).detail);
+        window.addEventListener('bl:use-script', onAi);
         const prefill = localStorage.getItem('bl_prefill_script')
         if (prefill) {
             setScript(prefill)
@@ -69,6 +71,7 @@ export default function ScriptSubmitForm() {
                 sessionStorage.removeItem('blenderlab_regenerate');
             }
         } catch { /* ignore */ }
+        return () => window.removeEventListener('bl:use-script', onAi);
     }, []);
 
     const toggleFormat = (format: OutputFormat) => {
