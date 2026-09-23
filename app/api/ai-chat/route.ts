@@ -18,8 +18,7 @@ function extractResponsesText(data: { output_text?: unknown; output?: RespBlock[
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENCODE_ZEN_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: 'AI not configured (missing OPENCODE_ZEN_API_KEY)' }, { status: 500 });
+  const provider = process.env.AI_PROVIDER || 'zen';
   const { messages } = await req.json();
   if (!Array.isArray(messages) || messages.length === 0)
     return NextResponse.json({ error: 'messages[] required' }, { status: 400 });
@@ -31,14 +30,31 @@ export async function POST(req: NextRequest) {
     system = 'Generate Blender bpy scripts. Only create geometry, no export/render/quit calls.';
   }
 
-  const model = process.env.OPENCODE_ZEN_MODEL || 'space-bunny-free';
-  const useResponses = RESPONSES_PREFIX.some((p) => model.startsWith(p));
-  const url = useResponses
-    ? 'https://opencode.ai/zen/v1/responses'
-    : 'https://opencode.ai/zen/v1/chat/completions';
-  const body = useResponses
-    ? { model, instructions: system, input: messages.slice(-10), max_output_tokens: 4000 }
-    : { model, messages: [{ role: 'system', content: system }, ...messages.slice(-10)], temperature: 0.4, max_tokens: 4000 };
+  let url: string;
+  let apiKey: string | undefined;
+  let model: string;
+  let body: unknown;
+  let useResponses = false;
+
+  if (provider === 'groq') {
+    // OpenAI-compatible: https://api.groq.com/openai/v1/chat/completions
+    apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: 'AI not configured (missing GROQ_API_KEY)' }, { status: 500 });
+    model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+    url = 'https://api.groq.com/openai/v1/chat/completions';
+    body = { model, messages: [{ role: 'system', content: system }, ...messages.slice(-10)], temperature: 0.4, max_tokens: 4000 };
+  } else {
+    apiKey = process.env.OPENCODE_ZEN_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: 'AI not configured (missing OPENCODE_ZEN_API_KEY)' }, { status: 500 });
+    model = process.env.OPENCODE_ZEN_MODEL || 'space-bunny-free';
+    useResponses = RESPONSES_PREFIX.some((p) => model.startsWith(p));
+    url = useResponses
+      ? 'https://opencode.ai/zen/v1/responses'
+      : 'https://opencode.ai/zen/v1/chat/completions';
+    body = useResponses
+      ? { model, instructions: system, input: messages.slice(-10), max_output_tokens: 4000 }
+      : { model, messages: [{ role: 'system', content: system }, ...messages.slice(-10)], temperature: 0.4, max_tokens: 4000 };
+  }
 
   const res = await fetch(url, {
     method: 'POST',
@@ -47,10 +63,13 @@ export async function POST(req: NextRequest) {
   });
   if (!res.ok) {
     const t = await res.text();
-    // ponytail: free keys die Zen-side (quota/policy) — say so, don't dump JSON.
+    // ponytail: free keys die provider-side (quota/policy) — say so, don't dump JSON.
     if (t.includes('FreeTierError'))
       return NextResponse.json({ error: 'Zen free quota exhausted for this key — add billing at opencode.ai/zen or try again later.' }, { status: 429 });
-    return NextResponse.json({ error: `Zen error ${res.status}: ${t.slice(0, 300)}` }, { status: 502 });
+    if (provider === 'groq' && res.status === 429)
+      return NextResponse.json({ error: 'Groq rate limit hit — try again in a minute.' }, { status: 429 });
+    const label = provider === 'groq' ? 'Groq' : 'Zen';
+    return NextResponse.json({ error: `${label} error ${res.status}: ${t.slice(0, 300)}` }, { status: 502 });
   }
   const data = await res.json();
   const reply: string = useResponses ? extractResponsesText(data) : (data.choices?.[0]?.message?.content ?? '');
