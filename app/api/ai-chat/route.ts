@@ -3,6 +3,9 @@ import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { extractScript as extractPython } from '@/lib/script-extract';
 
+// space-bunny spends ~4K tokens reasoning — budget must exceed that or content is empty.
+export const maxDuration = 300;
+
 // Zen routes models to different OpenAI-compatible endpoints:
 // chat/completions (kimi, deepseek, glm, ...) vs responses (gpt-*, muse-spark-*, grok-*).
 const RESPONSES_PREFIX = ['gpt-', 'muse-spark', 'grok-'];
@@ -50,8 +53,8 @@ export async function POST(req: NextRequest) {
   const useResponses = RESPONSES_PREFIX.some((p) => model.startsWith(p));
   const url = useResponses ? `${base}/responses` : `${base}/chat/completions`;
   const body = useResponses
-    ? { model, instructions: system, input: messages.slice(-10), max_output_tokens: 4000 }
-    : { model, messages: [{ role: 'system', content: system }, ...messages.slice(-10)], temperature: 0.4, max_tokens: 4000 };
+    ? { model, instructions: system, input: messages.slice(-10), max_output_tokens: 8000 }
+    : { model, messages: [{ role: 'system', content: system }, ...messages.slice(-10)], temperature: 0.4, max_tokens: 8000 };
 
   const res = await fetch(url, {
     method: 'POST',
