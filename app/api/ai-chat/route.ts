@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
   });
   if (!res.ok) {
     const t = await res.text();
+    // ponytail: free keys die Zen-side (quota/policy) — say so, don't dump JSON.
+    if (t.includes('FreeTierError'))
+      return NextResponse.json({ error: 'Zen free quota exhausted for this key — add billing at opencode.ai/zen or try again later.' }, { status: 429 });
     return NextResponse.json({ error: `Zen error ${res.status}: ${t.slice(0, 300)}` }, { status: 502 });
   }
   const data = await res.json();
