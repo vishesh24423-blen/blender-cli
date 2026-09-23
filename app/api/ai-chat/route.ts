@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     system = 'Generate Blender bpy scripts. Only create geometry, no export/render/quit calls.';
   }
 
-  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  const model = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
