@@ -7,14 +7,25 @@ import { extractScript as extractPython } from '@/lib/script-extract';
 // chat/completions (kimi, deepseek, glm, ...) vs responses (gpt-*, muse-spark-*, grok-*).
 const RESPONSES_PREFIX = ['gpt-', 'muse-spark', 'grok-'];
 
-// ponytail: Responses API shape only; add streaming when users ask.
-type RespBlock = { content?: { text?: unknown }[] };
-function extractResponsesText(data: { output_text?: unknown; output?: RespBlock[] }): string {
+// ponytail: proxies normalize to their own shapes — try responses, chat, anthropic, plain. Add streaming when users ask.
+type RespBlock = { content?: { text?: unknown; type?: unknown }[] };
+function extractReplyText(data: { output_text?: unknown; output?: RespBlock[]; choices?: { message?: { content?: unknown } }[]; content?: { type?: unknown; text?: unknown }[]; text?: unknown; response?: unknown }): string {
   if (typeof data?.output_text === 'string' && data.output_text) return data.output_text;
   const out = Array.isArray(data?.output) ? data.output : [];
-  return out.flatMap((b) => Array.isArray(b?.content) ? b.content : [])
+  const fromOutput = out.flatMap((b) => Array.isArray(b?.content) ? b.content : [])
     .filter((c) => typeof c?.text === 'string')
     .map((c) => c.text as string).join('\n');
+  if (fromOutput) return fromOutput;
+  const choice = data?.choices?.[0]?.message?.content;
+  if (typeof choice === 'string' && choice) return choice;
+  if (Array.isArray(data?.content)) {
+    const t = data.content.filter((c) => c?.type === 'text' && typeof c?.text === 'string')
+      .map((c) => c.text as string).join('\n');
+    if (t) return t;
+  }
+  if (typeof data?.text === 'string' && data.text) return data.text;
+  if (typeof data?.response === 'string' && data.response) return data.response;
+  return '';
 }
 
 export async function POST(req: NextRequest) {
@@ -55,6 +66,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Zen error ${res.status}: ${t.slice(0, 300)}` }, { status: 502 });
   }
   const data = await res.json();
-  const reply: string = useResponses ? extractResponsesText(data) : (data.choices?.[0]?.message?.content ?? '');
+  const reply = extractReplyText(data);
+  if (!reply) console.log('[ai-chat] empty reply, top-level keys:', Object.keys(data ?? {}));
   return NextResponse.json({ reply, script: extractPython(reply) });
 }
