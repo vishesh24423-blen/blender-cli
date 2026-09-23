@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ArrowRight, AlertTriangle, Zap, Layers, Clapperboard } from 'lucide-react';
 import type { OutputFormat } from '@/lib/types';
+import { extractScript } from '@/lib/script-extract';
 
 const FORMATS: { id: OutputFormat; label: string }[] = [
     { id: 'glb', label: 'GLB' },
@@ -81,7 +82,13 @@ export default function ScriptSubmitForm() {
     };
 
     const handleSubmit = async () => {
-        const scriptContent = script.trim() || SAMPLE_SCRIPT;
+        const raw = script.trim() || SAMPLE_SCRIPT;
+        // Pasted raw chat output (with ``` fences / prose)? Submit code only.
+        if (raw.includes('```') && !extractScript(raw)) {
+            setError('No runnable script found — paste Python code only, no chat text.');
+            return;
+        }
+        const scriptContent = extractScript(raw) ?? raw;
         if (formats.length === 0) {
             setError('Select at least one output format');
             return;

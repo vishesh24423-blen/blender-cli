@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
+import { extractScript as extractPython } from '@/lib/script-extract';
 
 // Zen routes models to different OpenAI-compatible endpoints:
 // chat/completions (kimi, deepseek, glm, ...) vs responses (gpt-*, muse-spark-*, grok-*).
 const RESPONSES_PREFIX = ['gpt-', 'muse-spark', 'grok-'];
-
-function extractPython(text: string): string | null {
-  const m = text.match(/```python([\s\S]*?)```/i) || text.match(/```([\s\S]*?)```/);
-  const code = (m ? m[1] : text).trim();
-  return /bpy|bmesh|mesh/i.test(code) ? code : null;
-}
 
 // ponytail: Responses API shape only; add streaming when users ask.
 type RespBlock = { content?: { text?: unknown }[] };
