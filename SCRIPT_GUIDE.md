@@ -4,6 +4,8 @@ The blender-cli worker runs **pure asset generation pipelines**. Your Python scr
 
 This guide has been updated with practices for generating **accurate, detailed geometry** rather than compact/blocky primitive stacks. If your goal is realistic or production-quality assets, follow the "Accurate Geometry" section closely — simple `primitive_cube_add` chains tend to look flat, low-detail, and geometrically imprecise.
 
+> **Full-fidelity mandate: no dumb / dummy assets.** Every script must create a complete, real-looking subject with accurate proportions, all major + minor parts, true-to-life shape (taper, curvature, thickness — never raw unedited primitives), and PBR colors/materials. A single-color blocky placeholder is a failed output. See "Full-Detail, Real-Looking Assets (No Dummies)".
+
 ## Quick Overview
 
 The worker pipeline is:
@@ -12,7 +14,7 @@ The worker pipeline is:
 3. **Fallback cube added** — only if your script made nothing
 4. **GLB export** — automatic, no preview render
 
-**There is no camera, HDRI, material override, or rendering involved.** The output is a pure geometry asset.
+**There is no camera, HDRI, material override, or rendering involved.** The output is a pure geometry asset — but **you** are responsible for color and realism. The worker never adds materials for you: if you create no materials, the GLB exports flat gray/white and looks like a dummy. Always create your own Principled BSDF materials (skin, hair, fabric, metal, etc.) and assign them.
 
 ---
 
@@ -34,6 +36,42 @@ Compact/blocky results usually come from relying only on `bpy.ops.mesh.primitive
 8. **Verify overlap and bounds at joints.** When assembling multi-part assets, parts that should touch need real geometric overlap (a few millimeters), not just visually-close coordinates. Compute each object's world-space bounding box and confirm intended overlap before moving to the next part.
 9. **Fix normals and manifoldness.** Detect flipped faces by checking `edge.is_manifold and not edge.is_contiguous`, or by testing signed volume for whole-object inversion. Flipped normals cause faces to look "burnt out" or missing after GLB export.
 10. **Finish with shading, not raw facets.** Apply `shade_smooth()` plus `mesh.set_sharp_from_angle(angle=...)` (radians) so curved and flat regions render correctly without manually marking every edge.
+11. **Model everything — no missing parts.** A real subject is complete: a human has head, face (eyes/iris/pupil, nose, mouth/teeth, ears), hair, torso, arms with fingers + nails, legs with toes, plus clothes/shoes where applicable. An animal/vehicle/furniture asset follows the same rule: all functional sub-parts must exist as real overlapping geometry, never implied or left out.
+12. **Real-looking shape, never raw primitives.** Every primitive must be edited after creation: scale to true proportions, taper limbs (use `primitive_cone_add` with distinct `radius1`/`radius2`), squash/stretch spheres for skulls/palms/heels, bevel hard edges, overlap joints by millimeters. If a part is still a perfect cube/sphere/cylinder straight from the operator, it is not done.
+13. **Always add PBR color.** Create one Principled BSDF material per surface (see example below), set Base Color + Roughness, and `obj.data.materials.append(mat)`. Distinct parts get distinct colors. Uncolored = dummy.
+
+---
+
+## Full-Detail, Real-Looking Assets (No Dummies)
+
+Dummy output = blocky single-color placeholder with missing parts (mitten hands, no face, no color). Reject it. Every submission must pass this checklist:
+
+- **Complete:** all major parts + all small parts (fingers/toes + nails, eyes/iris/pupil, ears, teeth, hair, fasteners/handles/seams for hard-surface). Build each as its own mesh with real overlap at joints.
+- **Real shape:** correct real-world proportions in meters (~1.7 m human, ~0.45 m chair seat, ~2.0 m door); tapered limbs via `radius1 != radius2`; squashed/stretched spheres for organic masses; beveled edges (width ~0.01–0.02, 2 segments) on every hard-surface part.
+- **Color:** minimum one material per surface type. Never export with zero materials.
+- **Density:** organic curves use 24–32 segments/rings on heads, 16+ on limbs; flat cubes always get bevel + smooth shade + sharp-from-angle (~30°).
+
+```python
+import bpy
+
+def get_mat(name, rgb, rough=0.7):
+    m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    m.use_nodes = True
+    bsdf = m.node_tree.nodes.get("Principled BSDF")
+    bsdf.inputs["Base Color"].default_value = (*rgb, 1.0)
+    bsdf.inputs["Roughness"].default_value = rough
+    return m
+
+skin = get_mat("Skin", (0.93, 0.76, 0.65), 0.6)
+hair = get_mat("Hair", (0.16, 0.11, 0.08), 0.85)
+
+bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=0.11, location=(0, 0, 1.62))
+head = bpy.context.active_object
+head.name = "Head"
+head.data.materials.append(skin)  # ponytail: assign per part, distinct colors
+```
+
+Rule of thumb: if you can count the primitives at a glance, or the whole asset is one gray color, add more parts, more shape editing, and more materials before submitting.
 
 ---
 
@@ -551,6 +589,11 @@ When your script runs successfully, you'll see:
 - Add bevels on hard edges, insets for panel lines, and booleans for holes/sockets
 - Verify `mesh.validate(verbose=True)` reports no issues, and that scale/rotation were applied before export
 
+**Asset looks dumb / dummy (gray, blocky, missing face/fingers/color)**
+- Missing-parts failure: you skipped minor geometry (fingers, toes, eyes, hair, handles). Model every part listed in "Full-Detail" — each as overlapping geometry.
+- Missing-color failure: you created zero materials. Add one Principled BSDF material per surface and append to each mesh.
+- Missing-shape failure: raw primitives with no taper/squash/bevel. Taper limbs (`radius1 != radius2`), squash spheres for organic masses, bevel all hard edges, then smooth-shade.
+
 ---
 
 ## Complete Example: Complex, Detailed Asset
@@ -628,7 +671,8 @@ print(f"[BL] {ASSET_NAME} generation complete")
 
 1. **Test locally**: Copy your script and run it in Blender's Python console
 2. **Check output**: Inspect generated meshes in the 3D viewport, and confirm proportions match your intended real-world dimensions
-3. **Run the audit**: Use the `audit_scene()` snippet above to check for un-applied transforms and mesh validity
+3. **Check realism**: complete parts (face/fingers/toes or equivalent), edited shapes (no raw primitives), one material per surface — reject gray blocky dummies
+4. **Run the audit**: Use the `audit_scene()` snippet above to check for un-applied transforms and mesh validity
 4. **Submit to worker**: Push to GitHub and trigger a job
 5. **Review logs**: Check `[BL]` markers in GitHub Actions output
 
