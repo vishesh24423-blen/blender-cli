@@ -42,8 +42,8 @@ export async function POST(req: NextRequest) {
     ? 'https://opencode.ai/zen/v1/responses'
     : 'https://opencode.ai/zen/v1/chat/completions';
   const body = useResponses
-    ? { model, instructions: system, input: messages.slice(-10), max_output_tokens: 2000 }
-    : { model, messages: [{ role: 'system', content: system }, ...messages.slice(-10)], temperature: 0.4, max_tokens: 2000 };
+    ? { model, instructions: system, input: messages.slice(-10), max_output_tokens: 4000 }
+    : { model, messages: [{ role: 'system', content: system }, ...messages.slice(-10)], temperature: 0.4, max_tokens: 4000 };
 
   const res = await fetch(url, {
     method: 'POST',

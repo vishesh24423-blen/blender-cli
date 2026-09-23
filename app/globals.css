@@ -1432,3 +1432,7 @@ body {
   background: var(--accent-green-dim); color: var(--accent-green);
   border: 1px solid rgba(34,197,94,0.25); cursor: pointer;
 }
+.ai-inserted {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; color: var(--accent-green);
+}

@@ -28,10 +28,13 @@ export default function AiChat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: next.map((m) => ({ role: m.role, content: m.content })) }),
+        signal: AbortSignal.timeout(150000),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI request failed');
+      if (!data.reply && !data.script) throw new Error('AI returned an empty response — try again or rephrase.');
       setMsgs([...next, { role: 'assistant', content: data.reply, script: data.script }]);
+      if (data.script) applyScript(data.script, true); // auto-fill editor
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
@@ -39,9 +42,9 @@ export default function AiChat() {
     }
   };
 
-  const applyScript = (script: string) => {
+  const applyScript = (script: string, quiet = false) => {
     window.dispatchEvent(new CustomEvent('bl:use-script', { detail: script }));
-    document.getElementById('script-editor')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!quiet) document.getElementById('script-editor')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const copyLast = async (script: string) => {
@@ -65,9 +68,9 @@ export default function AiChat() {
               <div className="ai-msg-body">
                 {m.script ? (
                   <>
-                    <pre className="ai-code">{m.script.slice(0, 1200)}{m.script.length > 1200 ? '\n# … (full script available via Use)' : ''}</pre>
+                    <pre className="ai-code">{m.script.slice(0, 1200)}{m.script.length > 1200 ? '\n# … (full script in editor below)' : ''}</pre>
                     <div className="ai-msg-actions">
-                      <button className="ai-btn" onClick={() => applyScript(m.script!)}><ArrowDownToLine size={13} /> Use this script</button>
+                      <span className="ai-inserted"><Check size={13} /> In editor below</span>
                       <button className="ai-btn ai-btn--ghost" onClick={() => copyLast(m.script!)}>{copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy'}</button>
                     </div>
                   </>
