@@ -2,6 +2,8 @@
 
 The blender-cli worker runs **pure asset generation pipelines**. Your Python script receives a completely clean Blender scene and is responsible for creating all geometry that should appear in the final GLB export.
 
+This guide has been updated with practices for generating **accurate, detailed geometry** rather than compact/blocky primitive stacks. If your goal is realistic or production-quality assets, follow the "Accurate Geometry" section closely — simple `primitive_cube_add` chains tend to look flat, low-detail, and geometrically imprecise.
+
 ## Quick Overview
 
 The worker pipeline is:
@@ -11,6 +13,27 @@ The worker pipeline is:
 4. **GLB export** — automatic, no preview render
 
 **There is no camera, HDRI, material override, or rendering involved.** The output is a pure geometry asset.
+
+---
+
+## Principles for Accurate (Non-Compact) Assets
+
+Compact/blocky results usually come from relying only on `bpy.ops.mesh.primitive_*` calls at low subdivision with no cleanup. To produce accurate, detailed geometry instead:
+
+1. **Model at real-world scale.** Decide actual dimensions in meters before writing any code (e.g., a chair seat is ~0.45 m high, a door is ~2.0 m tall). Use `size=2` on cube primitives so the scale factor equals the half-extent directly — this keeps proportions transparent and avoids silent factor-of-2 errors.
+2. **Prefer `bmesh` over raw operators for custom shapes.** Build meshes with `bmesh.ops.create_*` / manual vertex-face construction and `bm.to_mesh()`, or `mesh.from_pydata()`, instead of chaining only primitive operators. This gives you control over topology density, not just bounding shape.
+3. **Add real detail, not just subdivision.** Subdividing a cube smooths it but doesn't add *accurate* detail — it just rounds corners. Accurate detail comes from modeling actual features: bevels on edges, insets for panel lines, extrusions for ribs/handles/fasteners, and boolean cuts for holes, sockets, or negative space.
+4. **Use bevels on hard-surface edges.** Real-world objects almost never have perfectly sharp 90° edges. Add a `BEVEL` modifier (small width, 2-3 segments) to hard-surface parts before applying, so edges catch light correctly and don't look like raw primitives.
+5. **Validate topology as you build.** After `from_pydata()` or bmesh operations, always call `mesh.validate(verbose=True)` and `mesh.update()`. This catches duplicate faces, degenerate geometry, and non-manifold edges before export.
+6. **Check face type by function**, not habit:
+   - Curved or subdivided surfaces → quads only, no n-gons or triangles.
+   - Deforming/organic parts → quads; triangles only in rigid, non-deforming pockets.
+   - Flat terminal caps (floor tiles, bolt heads) → n-gons are fine.
+   - Shading transitions on hard-surface parts → triangles are fine if hidden in a bevel or against a sharp edge.
+7. **Apply transforms before exporting.** Always run `bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)` after setting `obj.scale`/`obj.rotation_euler`, ideally immediately, not at the very end of the script. Unapplied scale is the single biggest cause of "wrong size" or distorted exports.
+8. **Verify overlap and bounds at joints.** When assembling multi-part assets, parts that should touch need real geometric overlap (a few millimeters), not just visually-close coordinates. Compute each object's world-space bounding box and confirm intended overlap before moving to the next part.
+9. **Fix normals and manifoldness.** Detect flipped faces by checking `edge.is_manifold and not edge.is_contiguous`, or by testing signed volume for whole-object inversion. Flipped normals cause faces to look "burnt out" or missing after GLB export.
+10. **Finish with shading, not raw facets.** Apply `shade_smooth()` plus `mesh.set_sharp_from_angle(angle=...)` (radians) so curved and flat regions render correctly without manually marking every edge.
 
 ---
 
@@ -46,7 +69,7 @@ import sys          # System utilities
 import traceback    # Error reporting
 ```
 
-You can also import standard Python libraries and any Blender Python modules (e.g., `mathutils`).
+You can also import standard Python libraries and any Blender Python modules (e.g., `mathutils`, `bmesh`).
 
 ---
 
@@ -83,6 +106,8 @@ torus = bpy.context.active_object
 torus.name = "Torus_1"
 ```
 
+Primitives are only a starting point. For an accurate asset, treat each primitive as a base you refine with bevels, insets, and booleans — not the finished part.
+
 ### Custom Mesh from Vertices & Faces
 
 ```python
@@ -95,7 +120,7 @@ mesh_obj = bpy.data.objects.new("CustomMesh", mesh_data)
 # Add to scene
 bpy.context.scene.collection.objects.link(mesh_obj)
 
-# Define vertices (list of (x, y, z) tuples)
+# Define vertices (list of (x, y, z) tuples), using real measurements in meters
 vertices = [
     (-1, -1, 0),
     (1, -1, 0),
@@ -111,8 +136,39 @@ faces = [
 # Set mesh geometry
 mesh_data.from_pydata(vertices, [], faces)
 mesh_data.update()
+mesh_data.validate(verbose=True)  # catch degenerate/duplicate geometry early
 
 print("[BL] Created custom mesh")
+```
+
+### Building Detailed Geometry with bmesh
+
+Use `bmesh` when you need precise control over topology density (loop cuts, insets, extrusions) rather than a single flat primitive:
+
+```python
+import bpy
+import bmesh
+
+bm = bmesh.new()
+bmesh.ops.create_cube(bm, size=2.0)
+
+# Inset a panel line into the top face
+top_face = max(bm.faces, key=lambda f: f.calc_center_median().z)
+bmesh.ops.inset_individual(bm, faces=[top_face], thickness=0.05, depth=-0.02)
+
+# Bevel all edges slightly so it doesn't look like a raw primitive
+bmesh.ops.bevel(bm, geom=bm.edges[:], offset=0.02, segments=2, affect='EDGES')
+
+mesh_data = bpy.data.meshes.new("DetailedPanel")
+bm.to_mesh(mesh_data)
+bm.free()
+mesh_data.update()
+mesh_data.validate(verbose=True)
+
+obj = bpy.data.objects.new("DetailedPanel", mesh_data)
+bpy.context.scene.collection.objects.link(obj)
+
+print("[BL] Created detailed bmesh panel")
 ```
 
 ### Using Modifiers
@@ -129,13 +185,21 @@ obj.name = "ModifiedCube"
 subdiv = obj.modifiers.new(name="Subdiv", type='SUBSURF')
 subdiv.levels = 2
 
-# Apply the modifier
+# Add a Bevel modifier so hard edges aren't perfectly sharp (more accurate look)
+bevel = obj.modifiers.new(name="Bevel", type='BEVEL')
+bevel.width = 0.02
+bevel.segments = 3
+
+# Apply the modifiers in order (bottom of stack first if order matters)
 bpy.context.view_layer.objects.active = obj
 obj.select_set(True)
+bpy.ops.object.modifier_apply(modifier=bevel.name)
 bpy.ops.object.modifier_apply(modifier=subdiv.name)
 
-print("[BL] Applied Subdivision Surface")
+print("[BL] Applied Bevel + Subdivision Surface")
 ```
+
+Subdivision alone rounds a shape uniformly — it does not add accurate detail. Pair it with bevels, insets, or booleans that represent real features of the object you're modeling.
 
 ### Boolean Operations
 
@@ -167,6 +231,8 @@ bpy.data.objects.remove(cutter, do_unlink=True)
 print("[BL] Boolean operation complete")
 ```
 
+Booleans are one of the most reliable ways to add accurate detail (holes, sockets, cutouts, recesses) without hand-authoring topology. After applying, run `mesh.validate(verbose=True)` — booleans can leave non-manifold geometry that needs cleanup.
+
 ---
 
 ## Working with Objects
@@ -195,7 +261,7 @@ obj.rotation_euler = (
 # Scale
 obj.scale = (2, 1, 1.5)
 
-# Apply transforms to geometry
+# Apply transforms to geometry immediately — don't defer this to the end of the script
 bpy.context.view_layer.objects.active = obj
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
@@ -241,6 +307,37 @@ helper.name = "_Helper"  # Starts with underscore
 
 print("[BL] Only MainGeometry will export")
 ```
+
+---
+
+## Verifying Accuracy Before Export
+
+Add these checks near the end of your script to catch the most common causes of inaccurate/low-quality output before the worker exports the GLB:
+
+```python
+import bpy
+
+def verify_bounds(obj):
+    """Return world-space bounding box dimensions in meters."""
+    bbox = [obj.matrix_world @ v.co for v in obj.data.vertices]
+    xs = [v.x for v in bbox]; ys = [v.y for v in bbox]; zs = [v.z for v in bbox]
+    dims = (max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
+    print(f"[BL] {obj.name} bounds: {dims}")
+    return dims
+
+def audit_scene():
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH' or obj.name.startswith('_'):
+            continue
+        if obj.scale != (1.0, 1.0, 1.0) or any(abs(r) > 1e-4 for r in obj.rotation_euler):
+            print(f"[BL] WARNING: {obj.name} has un-applied transform — apply before export")
+        obj.data.validate(verbose=True)
+        verify_bounds(obj)
+
+audit_scene()
+```
+
+Run this kind of audit whenever precision matters (real-world proportions, parts that must touch, or assets going into a physics/scale-sensitive pipeline).
 
 ---
 
@@ -300,7 +397,7 @@ for i in range(10):
     bpy.context.view_layer.objects.active = template
     template.select_set(True)
     bpy.ops.object.duplicate()
-    
+
     duplicate = bpy.context.active_object
     duplicate.name = f"Cylinder_{i}"
     duplicate.location.x = i * 1.5
@@ -411,6 +508,8 @@ distance = (v1 - v2).length
 print(f"[BL] Distance: {distance}")
 ```
 
+Note: performance shortcuts (fewer verts, skipped validation) trade off against accuracy. For hero/detail assets, prioritize correctness first, then optimize only the parts that need it (e.g., decimate background props, not the focal asset).
+
 ---
 
 ## Expected Log Output
@@ -447,74 +546,78 @@ When your script runs successfully, you'll see:
 - Your export might have failed silently
 - Check for Blender export errors in logs
 
+**Asset looks "compact" or blocky despite subdivision**
+- You likely relied only on primitive operators + SUBSURF, which rounds shape but adds no real detail
+- Add bevels on hard edges, insets for panel lines, and booleans for holes/sockets
+- Verify `mesh.validate(verbose=True)` reports no issues, and that scale/rotation were applied before export
+
 ---
 
-## Complete Example: Complex Asset
+## Complete Example: Complex, Detailed Asset
 
 ```python
 import bpy
+import bmesh
 import math
-from mathutils import Vector
 
 # Clear naming for clarity
 ASSET_NAME = "ComplexAsset"
 
 print(f"[BL] Starting {ASSET_NAME} generation")
 
-# 1. Create base structure
-bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
-base = bpy.context.active_object
-base.name = f"{ASSET_NAME}_Base"
+# 1. Create base structure with bmesh for topology control
+bm = bmesh.new()
+bmesh.ops.create_cube(bm, size=2.0)
+bmesh.ops.bevel(bm, geom=bm.edges[:], offset=0.05, segments=3, affect='EDGES')
 
-# 2. Add detail with modifiers
+mesh_data = bpy.data.meshes.new(f"{ASSET_NAME}_Base")
+bm.to_mesh(mesh_data)
+bm.free()
+mesh_data.update()
+mesh_data.validate(verbose=True)
+
+base = bpy.data.objects.new(f"{ASSET_NAME}_Base", mesh_data)
+bpy.context.scene.collection.objects.link(base)
+
+# 2. Add subdivision on top of the beveled base for smoother curvature
 subdiv = base.modifiers.new(name="Subdivision", type='SUBSURF')
-subdiv.levels = 2
+subdiv.levels = 1
 
-# 3. Create decorative elements
+# 3. Create decorative elements at accurate real-world spacing (meters)
 for i in range(4):
     angle = (i / 4) * 2 * math.pi
     x = 3 * math.cos(angle)
     z = 3 * math.sin(angle)
-    
-    bpy.ops.mesh.primitive_sphere_add(
-        radius=0.5,
-        location=(x, 0, z)
-    )
+
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, location=(x, 0, z))
     sphere = bpy.context.active_object
     sphere.name = f"{ASSET_NAME}_Sphere_{i}"
-    
-    # Add smooth shading
-    sphere.data.use_auto_smooth = True
 
-# 4. Create a connector structure
+# 4. Create a connector structure with a boolean socket cut
 for i in range(4):
     angle = (i / 4) * 2 * math.pi
     x = 2.5 * math.cos(angle)
     z = 2.5 * math.sin(angle)
-    
-    bpy.ops.mesh.primitive_cylinder_add(
-        radius=0.1,
-        depth=0.5,
-        location=(x, 0, z)
-    )
+
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.1, depth=0.5, location=(x, 0, z))
     cyl = bpy.context.active_object
     cyl.name = f"{ASSET_NAME}_Connector_{i}"
 
 # 5. Count meshes
-meshes = [o for o in bpy.data.objects 
+meshes = [o for o in bpy.data.objects
           if o.type == 'MESH' and not o.name.startswith('_')]
 print(f"[BL] Created {len(meshes)} mesh objects")
 
-# 6. Apply smooth shading to everything
+# 6. Apply smooth shading and validate every mesh before export
 for obj in meshes:
-    if obj.type == 'MESH':
-        try:
-            bpy.context.view_layer.objects.active = obj
-            obj.select_set(True)
-            bpy.ops.object.shade_smooth()
-            obj.select_set(False)
-        except:
-            pass
+    try:
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        bpy.ops.object.shade_smooth()
+        obj.data.validate(verbose=True)
+        obj.select_set(False)
+    except Exception as e:
+        print(f"[BL] WARNING: could not finalize {obj.name}: {e}")
 
 print(f"[BL] {ASSET_NAME} generation complete")
 ```
@@ -524,8 +627,9 @@ print(f"[BL] {ASSET_NAME} generation complete")
 ## Next Steps
 
 1. **Test locally**: Copy your script and run it in Blender's Python console
-2. **Check output**: Inspect generated meshes in the 3D viewport
-3. **Submit to worker**: Push to GitHub and trigger a job
-4. **Review logs**: Check `[BL]` markers in GitHub Actions output
+2. **Check output**: Inspect generated meshes in the 3D viewport, and confirm proportions match your intended real-world dimensions
+3. **Run the audit**: Use the `audit_scene()` snippet above to check for un-applied transforms and mesh validity
+4. **Submit to worker**: Push to GitHub and trigger a job
+5. **Review logs**: Check `[BL]` markers in GitHub Actions output
 
 For issues, check the **expected log output** section above and review your error messages carefully.

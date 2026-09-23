@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from 'react'
 
+// React 19 assigns props on custom elements as *properties* when a matching
+// property exists on the element instance, and only falls back to attributes
+// otherwise. <model-viewer> declares camelCase properties (autoRotate,
+// cameraControls, toneMapping, ...), so the kebab-case names used previously
+// (auto-rotate, camera-controls, tone-mapping) were written to string keys the
+// element never reads - the viewer rendered but ignored every setting.
+// Everything below therefore uses camelCase property names.
 declare module 'react' {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
@@ -10,16 +17,22 @@ declare module 'react' {
         src?: string
         alt?: string
         poster?: string
-        'tone-mapping'?: string
-        'shadow-intensity'?: string
-        'shadow-softness'?: string
+        loading?: 'auto' | 'lazy' | 'eager'
+        reveal?: 'auto' | 'manual'
+        toneMapping?: string
+        shadowIntensity?: string
+        shadowSoftness?: string
         exposure?: string
-        'camera-controls'?: boolean
-        'auto-rotate'?: boolean
-        'auto-rotate-delay'?: string
-        'rotation-per-second'?: string
-        'environment-image'?: string
-        'skybox-image'?: string
+        cameraControls?: boolean
+        autoRotate?: boolean
+        autoRotateDelay?: string
+        rotationPerSecond?: string
+        environmentImage?: string
+        skyboxImage?: string
+        interactionPrompt?: string
+        cameraOrbit?: string
+        minCameraOrbit?: string
+        maxCameraOrbit?: string
         style?: React.CSSProperties
       }, HTMLElement>
     }
@@ -41,16 +54,60 @@ export default function ThreeViewer({
 }: ThreeViewerProps) {
   const [loaded, setLoaded] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [failed, setFailed] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
 
+  // Load the model-viewer custom element once, and track when it is upgraded.
+  // React renders <model-viewer> on the first pass; until the module defines the
+  // element it is just an unknown inline element, so we re-render after the
+  // upgrade to make sure the element picks up its properties.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (!customElements.get('model-viewer')) {
+    let cancelled = false
+
+    const markReady = () => {
+      if (!cancelled) setReady(true)
+    }
+
+    if (customElements.get('model-viewer')) {
+      markReady()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[data-model-viewer]'
+    )
+    if (!existing) {
       const script = document.createElement('script')
       script.type = 'module'
-      script.src = 'https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js'
+      script.dataset.modelViewer = 'true'
+      script.src =
+        'https://unpkg.com/@google/model-viewer@4.3.1/dist/model-viewer.min.js'
       document.head.appendChild(script)
     }
+
+    // Resolve as soon as the element is defined, so the viewer becomes
+    // interactive even if `load` fired before React attached its listeners.
+    customElements.whenDefined('model-viewer').then(markReady).catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
   }, [])
+
+  // If the GLB never loads (bad R2 URL, CORS, offline), surface it instead of
+  // spinning forever.
+  useEffect(() => {
+    if (loaded || failed) return
+    const timer = setTimeout(() => {
+      setFailed((prev) => prev ?? 'Model is taking too long to load.')
+    }, 30_000)
+    return () => clearTimeout(timer)
+  }, [loaded, failed])
+
+  const progressPct = Math.max(0, Math.min(100, Math.round(progress)))
 
   return (
     <div
@@ -59,17 +116,20 @@ export default function ThreeViewer({
     >
       <model-viewer
         src={glbUrl}
-        poster={previewUrl || ''}
-        alt="3D model"
-        tone-mapping="aces"
-        shadow-intensity="1.6"
-        shadow-softness="1.0"
+        {...(previewUrl ? { poster: previewUrl } : {})}
+        alt="3D model preview"
+        loading="eager"
+        reveal="auto"
+        toneMapping="aces"
+        shadowIntensity="1.6"
+        shadowSoftness="1.0"
         exposure="1.3"
-        camera-controls
-        auto-rotate={autoRotate}
-        auto-rotate-delay="800"
-        rotation-per-second="16deg"
-        environment-image="neutral"
+        cameraControls
+        autoRotate={autoRotate}
+        autoRotateDelay="800"
+        rotationPerSecond="16deg"
+        environmentImage="neutral"
+        interactionPrompt="none"
         style={{
           width: '100%',
           height: '100%',
@@ -78,62 +138,79 @@ export default function ThreeViewer({
           '--poster-color': 'transparent',
         } as React.CSSProperties}
         onProgress={(e) => {
-          const ce = e as unknown as CustomEvent<{ totalProgress: number }>;
-          setProgress(Math.round((ce.detail?.totalProgress ?? 0) * 100));
+          const ce = e as unknown as CustomEvent<{ totalProgress: number }>
+          setProgress(Math.round((ce.detail?.totalProgress ?? 0) * 100))
         }}
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          setLoaded(true)
+          setFailed(null)
+        }}
+        onError={() => setFailed('Could not load the 3D model file.')}
       >
-        {/* Loading state */}
-        {!loaded && (
-          <div
-            slot="progress-bar"
-            className="absolute inset-0 flex flex-col items-center justify-center gap-4"
-            style={{ background: 'linear-gradient(135deg, #0a0b0f, #0f0f1e)' }}
-          >
-            {previewUrl && (
-              // Dynamic R2 preview URL — next/image would need remotePatterns config
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={previewUrl}
-                alt="preview"
-                className="absolute inset-0 w-full h-full object-cover opacity-40 blur-sm"
-              />
-            )}
-            <div className="relative z-10 flex flex-col items-center gap-3">
-              <div className="relative w-16 h-16">
-                <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
-                  <circle cx="32" cy="32" r="28" fill="none" stroke="#ffffff10" strokeWidth="4"/>
-                  <circle
-                    cx="32" cy="32" r="28"
-                    fill="none" stroke="#7c3aed" strokeWidth="4"
-                    strokeDasharray={`${progress * 1.759} 175.9`}
-                    strokeLinecap="round"
-                    style={{ transition: 'stroke-dasharray 0.3s ease' }}
-                  />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-white text-sm font-medium">
-                  {progress}%
-                </span>
-              </div>
-              <p className="text-white/40 text-xs tracking-widest uppercase">Loading model</p>
+        {/* model-viewer's progress-bar slot shows while the model downloads. */}
+        <div slot="progress-bar" className="mv-progress-wrap">
+          {previewUrl && (
+            // Dynamic R2 preview URL — next/image would need remotePatterns config
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={previewUrl} alt="" className="mv-progress-poster" />
+          )}
+          <div className="mv-progress-content">
+            <div className="mv-progress-ring">
+              <svg viewBox="0 0 64 64" className="mv-progress-svg">
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#ffffff10" strokeWidth="4"/>
+                <circle
+                  cx="32" cy="32" r="28"
+                  fill="none" stroke="#7c3aed" strokeWidth="4"
+                  strokeDasharray={`${(progressPct / 100) * 175.9} 175.9`}
+                  strokeLinecap="round"
+                  style={{ transition: 'stroke-dasharray 0.3s ease' }}
+                />
+              </svg>
+              <span className="mv-progress-pct">{progressPct}%</span>
             </div>
+            <p className="mv-progress-label">Loading model</p>
           </div>
-        )}
+        </div>
       </model-viewer>
 
+      {/* Overlay for the window before the custom element is upgraded. Without
+          this the element is an unknown inline box and the viewer looks blank. */}
+      {!loaded && (
+        <div className="viewer-overlay">
+          {failed ? (
+            <>
+              <span className="viewer-overlay-title">Viewer unavailable</span>
+              <span className="viewer-overlay-hint">{failed}</span>
+              <a href={glbUrl} download className="viewer-overlay-link">
+                Download the GLB instead
+              </a>
+            </>
+          ) : (
+            <>
+              <span className="viewer-overlay-title">
+                {ready ? 'Loading model…' : 'Starting 3D viewer…'}
+              </span>
+              <span className="viewer-overlay-hint">
+                You can download the file below while it loads.
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Bottom HUD bar */}
-      <div 
-        className="absolute bottom-0 left-0 right-0 px-4 py-2.5 flex items-center justify-between"
+      <div
+        className="absolute bottom-0 left-0 right-0 px-4 py-2.5 flex items-center justify-between pointer-events-none"
         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)' }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 pointer-events-auto">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-white/40 text-xs">Drag to rotate · Scroll to zoom · Right-click to pan</span>
         </div>
         <a
           href={glbUrl}
           download
-          className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+          className="text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 pointer-events-auto"
         >
           <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
             <path d="M5 7L1.5 3.5h2V1h3v2.5h2L5 7zM1 8.5h8V10H1z"/>
