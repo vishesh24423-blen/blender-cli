@@ -58,7 +58,7 @@ export default function AiChat() {
       <div className="ai-chat-head">
         <span className="ai-chat-badge"><Sparkles size={14} /> AI sculptor</span>
         <h2>Describe it — get a Blender script</h2>
-        <p>Powered by OpenCode Zen. Output follows the worker rules (geometry only, Blender 5.2-safe).</p>
+        <p>Powered by Groq. Output follows the worker rules (geometry only, Blender 5.2-safe).</p>
       </div>
 
       {msgs.length > 0 && (
