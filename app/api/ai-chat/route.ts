@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     system = 'Generate Blender bpy scripts. Only create geometry, no export/render/quit calls.';
   }
 
-  const model = process.env.OPENCODE_ZEN_MODEL || 'muse-spark-1.3-contributor-free';
+  const model = process.env.OPENCODE_ZEN_MODEL || 'space-bunny-free';
   const useResponses = RESPONSES_PREFIX.some((p) => model.startsWith(p));
   const url = useResponses ? `${base}/responses` : `${base}/chat/completions`;
   const body = useResponses
@@ -70,6 +70,12 @@ export async function POST(req: NextRequest) {
   }
   const data = await res.json();
   const reply = extractReplyText(data);
-  if (!reply) console.log('[ai-chat] empty reply, top-level keys:', Object.keys(data ?? {}));
+  if (!reply) {
+    const fr = data?.choices?.[0]?.finish_reason;
+    console.log('[ai-chat] empty reply, finish_reason:', fr, 'keys:', Object.keys(data ?? {}));
+    return NextResponse.json({ error: fr === 'length'
+      ? 'AI spent its whole output budget thinking — try a shorter, simpler request.'
+      : 'AI returned an empty response — try again or rephrase.' }, { status: 502 });
+  }
   return NextResponse.json({ reply, script: extractPython(reply) });
 }
